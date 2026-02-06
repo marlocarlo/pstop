@@ -1,0 +1,37 @@
+[package]
+name = "pstop"
+version = "0.1.0"
+edition = "2021"
+description = "An htop-like system monitor for Windows PowerShell, written in Rust"
+
+[dependencies]
+# TUI framework
+ratatui = "0.29"
+crossterm = "0.28"
+
+# System information
+sysinfo = "0.33"
+
+# Windows-specific APIs
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_Security",
+    "Win32_System_SystemInformation",
+    "Win32_System_Diagnostics_ToolHelp",
+] }
+
+# Error handling
+anyhow = "1"
+
+# Time handling
+chrono = "0.4"
+
+# Unicode width for proper column alignment
+unicode-width = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

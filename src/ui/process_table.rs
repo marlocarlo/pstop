@@ -1,0 +1,307 @@
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::Paragraph;
+
+use crate::app::{App, AppMode};
+use crate::system::memory::format_bytes;
+use crate::system::process::ProcessSortField;
+
+/// htop's exact default column headers and widths:
+/// PID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ Command
+const HEADERS: &[(&str, u16, ProcessSortField)] = &[
+    ("PID",     7,  ProcessSortField::Pid),
+    ("USER",    9,  ProcessSortField::User),
+    ("PRI",     4,  ProcessSortField::Priority),
+    ("NI",      4,  ProcessSortField::Nice),
+    ("VIRT",    7,  ProcessSortField::VirtMem),
+    ("RES",     7,  ProcessSortField::ResMem),
+    ("SHR",     7,  ProcessSortField::SharedMem),
+    ("S",       2,  ProcessSortField::Status),
+    ("CPU%",    6,  ProcessSortField::Cpu),
+    ("MEM%",    6,  ProcessSortField::Mem),
+    ("TIME+",   10, ProcessSortField::Time),
+    ("Command", 0,  ProcessSortField::Command), // 0 = takes remaining space
+];
+
+/// Draw the process table
+pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
+    if area.height < 2 {
+        return;
+    }
+
+    // --- Column header row (full-width colored background like htop) ---
+    let header_area = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+
+    // Build a full-width background for the header
+    let bg_line = " ".repeat(area.width as usize);
+    f.render_widget(
+        Paragraph::new(bg_line).style(Style::default().bg(Color::Cyan).fg(Color::Black)),
+        header_area,
+    );
+
+    // Build header spans with sort indicator
+    let mut header_spans: Vec<Span> = Vec::new();
+    for (name, width, sort_field) in HEADERS {
+        let is_sorted = *sort_field == app.sort_field;
+        let w = if *width == 0 { (area.width as usize).saturating_sub(fixed_cols_width()) } else { *width as usize };
+
+        let display = if is_sorted {
+            let arrow = if app.sort_ascending { "▲" } else { "▼" };
+            format!("{}{}", name, arrow)
+        } else {
+            name.to_string()
+        };
+
+        let padded = if *width == 0 {
+            display // Command column: no padding
+        } else {
+            format!("{:<width$}", display, width = w)
+        };
+
+        let style = if is_sorted {
+            Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Black).bg(Color::Cyan)
+        };
+
+        header_spans.push(Span::styled(padded, style));
+        if *width > 0 {
+            header_spans.push(Span::styled(" ", Style::default().bg(Color::Cyan)));
+        }
+    }
+    let header_line = Line::from(header_spans);
+    f.render_widget(Paragraph::new(header_line), header_area);
+
+    // --- Process rows ---
+    let table_area = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: area.height - 1,
+    };
+
+    // Search bar takes 1 row at bottom if active
+    let (proc_area, bar_area) = if app.mode == AppMode::Search || app.mode == AppMode::Filter {
+        let proc_h = table_area.height.saturating_sub(1);
+        (
+            Rect { height: proc_h, ..table_area },
+            Some(Rect {
+                x: table_area.x,
+                y: table_area.y + proc_h,
+                width: table_area.width,
+                height: 1,
+            }),
+        )
+    } else if !app.filter_query.is_empty() {
+        // Filter is active even in Normal mode — show persistent indicator
+        let proc_h = table_area.height.saturating_sub(1);
+        (
+            Rect { height: proc_h, ..table_area },
+            Some(Rect {
+                x: table_area.x,
+                y: table_area.y + proc_h,
+                width: table_area.width,
+                height: 1,
+            }),
+        )
+    } else {
+        (table_area, None)
+    };
+
+    let visible = proc_area.height as usize;
+    let start = app.scroll_offset;
+    let end = (start + visible).min(app.filtered_processes.len());
+
+    for (i, row_idx) in (start..end).enumerate() {
+        let proc = &app.filtered_processes[row_idx];
+        let is_selected = row_idx == app.selected_index;
+        let is_tagged = app.tagged_pids.contains(&proc.pid);
+
+        let row_area = Rect {
+            x: proc_area.x,
+            y: proc_area.y + i as u16,
+            width: proc_area.width,
+            height: 1,
+        };
+
+        let row_line = build_process_row(proc, row_area.width as usize, app, is_selected, is_tagged);
+        f.render_widget(Paragraph::new(row_line), row_area);
+    }
+
+    // Search / Filter bar
+    if let Some(bar_rect) = bar_area {
+        let bar_line = if app.mode == AppMode::Search {
+            // F3 search: "Search: xxx_"
+            Line::from(vec![
+                Span::styled(
+                    "Search: ",
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(app.search_query.clone(), Style::default().fg(Color::White)),
+                Span::styled(
+                    "_",
+                    Style::default().fg(Color::White).add_modifier(Modifier::SLOW_BLINK),
+                ),
+            ])
+        } else if app.mode == AppMode::Filter {
+            // F4 active filter editing: "Filter: xxx_"
+            Line::from(vec![
+                Span::styled(
+                    "Filter: ",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(app.filter_query.clone(), Style::default().fg(Color::White)),
+                Span::styled(
+                    "_",
+                    Style::default().fg(Color::White).add_modifier(Modifier::SLOW_BLINK),
+                ),
+            ])
+        } else {
+            // Persistent filter indicator in normal mode
+            Line::from(vec![
+                Span::styled(
+                    "Filter[active]: ",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(app.filter_query.clone(), Style::default().fg(Color::White)),
+            ])
+        };
+        f.render_widget(Paragraph::new(bar_line), bar_rect);
+    }
+}
+
+/// Total width of all fixed-width columns (for calculating Command column)
+fn fixed_cols_width() -> usize {
+    HEADERS.iter().map(|(_, w, _)| if *w > 0 { *w as usize + 1 } else { 0 }).sum()
+}
+
+/// Build a single process row as a styled Line (matching htop's exact columns)
+fn build_process_row(
+    proc: &crate::system::process::ProcessInfo,
+    width: usize,
+    app: &App,
+    selected: bool,
+    tagged: bool,
+) -> Line<'static> {
+    // Background: selected = dark gray highlight (like htop's selection bar)
+    let bg = if selected {
+        Color::Indexed(236) // Dark gray
+    } else {
+        Color::Reset
+    };
+
+    // Tag color: tagged processes show in yellow (like htop)
+    let pid_fg = if tagged {
+        Color::Yellow
+    } else {
+        Color::Green
+    };
+
+    // CPU color coding (htop: green < yellow < red)
+    let cpu_fg = if proc.cpu_usage > 90.0 {
+        Color::Red
+    } else if proc.cpu_usage > 50.0 {
+        Color::Yellow
+    } else {
+        Color::Green
+    };
+
+    // Memory color
+    let mem_fg = if proc.mem_usage > 50.0 {
+        Color::Red
+    } else if proc.mem_usage > 20.0 {
+        Color::Yellow
+    } else {
+        Color::White
+    };
+
+    // Status color (htop convention)
+    let status_fg = match &proc.status {
+        crate::system::process::ProcessStatus::Running => Color::Green,
+        crate::system::process::ProcessStatus::Sleeping => Color::Reset,
+        crate::system::process::ProcessStatus::DiskSleep => Color::Red,
+        crate::system::process::ProcessStatus::Stopped => Color::Red,
+        crate::system::process::ProcessStatus::Zombie => Color::Magenta,
+        crate::system::process::ProcessStatus::Unknown => Color::DarkGray,
+    };
+
+    // Tree prefix
+    let tree_prefix = if app.tree_view && proc.depth > 0 {
+        let mut prefix = String::new();
+        for _ in 0..proc.depth.saturating_sub(1) {
+            prefix.push_str("│ ");
+        }
+        if proc.is_last_child {
+            prefix.push_str("└─");
+        } else {
+            prefix.push_str("├─");
+        }
+        prefix
+    } else {
+        String::new()
+    };
+
+    // Command column: htop highlights the basename in bold/color
+    let cmd_width = width.saturating_sub(fixed_cols_width());
+    // 'p' toggle: show full command path or just the process name
+    let cmd_text = if app.show_full_path {
+        proc.command.clone()
+    } else {
+        proc.name.clone()
+    };
+    let command_display = format!("{}{}", tree_prefix, cmd_text);
+    let command_truncated = truncate_str(&command_display, cmd_width);
+
+    // Highlight process name (basename) within command — htop shows basename in green/bold
+    let base_name = &proc.name;
+
+    let base_style = Style::default().bg(bg);
+
+    // Build spans matching htop's exact column order:
+    // PID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ Command
+    let mut spans = vec![
+        Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)),
+        Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(Color::LightCyan)),
+        Span::styled(format!("{:>3} ", proc.priority), base_style.fg(Color::White)),
+        Span::styled(format!("{:>3} ", proc.nice), base_style.fg(Color::White)),
+        Span::styled(format!("{:>6} ", format_bytes(proc.virtual_mem)), base_style.fg(Color::Cyan)),
+        Span::styled(format!("{:>6} ", format_bytes(proc.resident_mem)), base_style.fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{:>6} ", format_bytes(proc.shared_mem)), base_style.fg(Color::White)),
+        Span::styled(format!("{} ", proc.status.symbol()), base_style.fg(status_fg)),
+        Span::styled(format!("{:>5.1} ", proc.cpu_usage), base_style.fg(cpu_fg)),
+        Span::styled(format!("{:>5.1} ", proc.mem_usage), base_style.fg(mem_fg)),
+        Span::styled(format!("{:>9} ", proc.format_time()), base_style.fg(Color::White)),
+    ];
+
+    // Command with basename highlighting (htop shows the process name in a different color)
+    if let Some(pos) = command_truncated.find(base_name.as_str()) {
+        let before = &command_truncated[..pos];
+        let name_part = &command_truncated[pos..pos + base_name.len().min(command_truncated.len() - pos)];
+        let after = &command_truncated[pos + name_part.len()..];
+        if !before.is_empty() {
+            spans.push(Span::styled(before.to_string(), base_style.fg(Color::White)));
+        }
+        spans.push(Span::styled(
+            name_part.to_string(),
+            base_style.fg(Color::Magenta).add_modifier(Modifier::BOLD),
+        ));
+        if !after.is_empty() {
+            spans.push(Span::styled(after.to_string(), base_style.fg(Color::White)));
+        }
+    } else {
+        spans.push(Span::styled(command_truncated, base_style.fg(Color::White)));
+    }
+
+    Line::from(spans)
+}
+
+/// Truncate a string to max characters
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.chars().count() > max {
+        s.chars().take(max).collect()
+    } else {
+        s.to_string()
+    }
+}

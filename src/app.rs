@@ -17,6 +17,7 @@ pub enum AppMode {
     Affinity,    // a: CPU affinity selector
     Environment, // e: show process details/environment
     Setup,       // F2: setup menu (column/display configuration)
+    Handles,     // l: list open files/handles (lsof equivalent)
 }
 
 /// Main application state

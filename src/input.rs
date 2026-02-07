@@ -17,6 +17,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent) {
         AppMode::Affinity  => handle_affinity_mode(app, key),
         AppMode::Environment => handle_environment_mode(app, key),
         AppMode::Setup     => handle_setup_mode(app, key),
+        AppMode::Handles   => handle_handles_mode(app, key),
     }
 }
 
@@ -191,6 +192,13 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Char('e') => {
             if app.selected_process().is_some() {
                 app.mode = AppMode::Environment;
+            }
+        }
+
+        // ── List open files/handles (htop 'l' - lsof equivalent) ──
+        KeyCode::Char('l') => {
+            if app.selected_process().is_some() {
+                app.mode = AppMode::Handles;
             }
         }
 
@@ -435,6 +443,17 @@ fn handle_affinity_mode(app: &mut App, key: KeyEvent) {
 fn handle_environment_mode(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('e') | KeyCode::Char('q') | KeyCode::Enter => {
+            app.mode = AppMode::Normal;
+        }
+        _ => {}
+    }
+}
+
+// ── Handles view mode (l - lsof) ────────────────────────────────────────
+
+fn handle_handles_mode(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('l') | KeyCode::Char('q') | KeyCode::Enter => {
             app.mode = AppMode::Normal;
         }
         _ => {}

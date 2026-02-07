@@ -8,6 +8,7 @@ pub mod user_menu;
 pub mod affinity_menu;
 pub mod environment_view;
 pub mod setup_menu;
+pub mod handles_view;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -52,6 +53,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         AppMode::UserFilter => user_menu::draw_user_menu(f, app),
         AppMode::Affinity => affinity_menu::draw_affinity_menu(f, app),
         AppMode::Environment => environment_view::draw_environment_view(f, app),
+        AppMode::Handles => handles_view::draw_handles_view(f, app),
         _ => {}
     }
 }

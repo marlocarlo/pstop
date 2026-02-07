@@ -2,14 +2,18 @@
 //! - Process priority class → mapped to PRI and NI columns
 //! - Per-process thread count
 //! - Shared working set memory (estimated)
+//! - Open handles/files enumeration
 
 use std::collections::HashMap;
 use std::mem;
 
-use windows::Win32::Foundation::CloseHandle;
+use windows::Win32::Foundation::{CloseHandle, MAX_PATH, HMODULE};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next,
     TH32CS_SNAPTHREAD, THREADENTRY32,
+};
+use windows::Win32::System::ProcessStatus::{
+    EnumProcessModulesEx, GetModuleFileNameExW, LIST_MODULES_ALL,
 };
 use windows::Win32::System::Threading::{
     GetPriorityClass, OpenProcess, SetPriorityClass, GetProcessIoCounters,
@@ -286,4 +290,67 @@ pub fn get_cpu_count() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
+}
+
+/// Handle information for display in lsof-style viewer
+#[derive(Debug, Clone)]
+pub struct HandleInfo {
+    pub handle_type: String,
+    pub name: String,
+}
+
+/// Get open handles/modules for a process (Windows lsof equivalent)
+/// Returns loaded modules (DLLs) as a basic implementation
+/// Full handle enumeration would require NtQuerySystemInformation
+pub fn get_process_handles(pid: u32) -> Vec<HandleInfo> {
+    let mut handles = Vec::new();
+    
+    unsafe {
+        // Try to open process with query rights
+        let handle = match OpenProcess(PROCESS_QUERY_INFORMATION, false, pid) {
+            Ok(h) => h,
+            Err(_) => return handles, // Can't access process (needs elevation)
+        };
+
+        // Enumerate loaded modules (DLLs and EXE)
+        let mut modules: Vec<HMODULE> = vec![HMODULE(std::ptr::null_mut()); 1024];
+        let mut bytes_needed = 0u32;
+
+        let result = EnumProcessModulesEx(
+            handle,
+            modules.as_mut_ptr(),
+            (modules.len() * mem::size_of::<HMODULE>()) as u32,
+            &mut bytes_needed,
+            LIST_MODULES_ALL,
+        );
+
+        if result.is_ok() && bytes_needed > 0 {
+            let module_count = (bytes_needed as usize) / mem::size_of::<HMODULE>();
+
+            for i in 0..module_count.min(modules.len()) {
+                if modules[i].0.is_null() {
+                    continue;
+                }
+
+                let mut filename = vec![0u16; MAX_PATH as usize];
+                let len = GetModuleFileNameExW(
+                    handle,
+                    modules[i],
+                    &mut filename,
+                );
+
+                if len > 0 {
+                    let path = String::from_utf16_lossy(&filename[..len as usize]);
+                    handles.push(HandleInfo {
+                        handle_type: "Module".to_string(),
+                        name: path,
+                    });
+                }
+            }
+        }
+
+        let _ = CloseHandle(handle);
+    }
+
+    handles
 }

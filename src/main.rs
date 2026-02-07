@@ -33,7 +33,7 @@ use app::App;
 use system::collector::Collector;
 
 /// Refresh interval in milliseconds
-const TICK_RATE_MS: u64 = 1000;
+const TICK_RATE_MS: u64 = 1500;
 
 fn main() -> Result<()> {
     // Setup terminal
@@ -70,6 +70,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
     let mut app = App::new();
     let mut collector = Collector::new();
     let tick_rate = Duration::from_millis(TICK_RATE_MS);
+    let mut last_tick = Instant::now();
 
     // Initial data collection
     collector.refresh(&mut app);
@@ -89,48 +90,51 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
         // Draw
         terminal.draw(|f| ui::draw(f, &app))?;
 
-        // Handle events with timeout = tick_rate
-        let timeout = tick_rate;
-        let deadline = Instant::now() + timeout;
-
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-
-            if event::poll(remaining)? {
-                match event::read()? {
-                    Event::Key(key) => {
-                        // On Windows, crossterm fires Press and Release; only handle Press
-                        if key.kind == KeyEventKind::Press {
-                            input::handle_input(&mut app, key);
-                        }
-                    }
-                    Event::Mouse(mouse) => {
-                        use crossterm::event::{MouseEventKind};
-                        match mouse.kind {
-                            MouseEventKind::ScrollUp => app.select_prev(),
-                            MouseEventKind::ScrollDown => app.select_next(),
-                            _ => {}
-                        }
-                    }
-                    _ => {}
-                }
-            } else {
-                break;
-            }
-
-            if app.should_quit {
-                return Ok(());
-            }
-        }
-
+        // Check if we should quit before waiting for events
         if app.should_quit {
             return Ok(());
         }
 
-        // Refresh system data
-        collector.refresh(&mut app);
+        // Handle events with short timeout for responsiveness
+        let timeout = Duration::from_millis(50);
+        let mut should_refresh = false;
+
+        if event::poll(timeout)? {
+            match event::read()? {
+                Event::Key(key) => {
+                    // On Windows, crossterm fires Press and Release; only handle Press
+                    if key.kind == KeyEventKind::Press {
+                        input::handle_input(&mut app, key);
+                        // Immediate redraw after user input for responsiveness
+                        if app.should_quit {
+                            return Ok(());
+                        }
+                    }
+                }
+                Event::Mouse(mouse) => {
+                    use crossterm::event::{MouseEventKind};
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => app.select_prev(),
+                        MouseEventKind::ScrollDown => app.select_next(),
+                        _ => {}
+                    }
+                }
+                Event::Resize(_, _) => {
+                    // Terminal resize - will be handled on next draw
+                }
+                _ => {}
+            }
+        }
+
+        // Check if it's time to refresh system data
+        let now = Instant::now();
+        if now.duration_since(last_tick) >= tick_rate {
+            should_refresh = true;
+            last_tick = now;
+        }
+
+        if should_refresh {
+            collector.refresh(&mut app);
+        }
     }
 }

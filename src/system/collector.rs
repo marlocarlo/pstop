@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use sysinfo::{System, ProcessStatus as SysProcessStatus, Users};
+use sysinfo::{System, ProcessStatus as SysProcessStatus, ProcessesToUpdate, Users};
 
 use crate::app::App;
 use crate::system::cpu::{CpuCore, CpuInfo};
@@ -14,6 +14,9 @@ pub struct Collector {
     users: Users,
     /// Cache: sysinfo user_id string -> resolved display name
     user_cache: HashMap<String, String>,
+    /// Cache: Win32 process data (priority, threads) - updated every 3 ticks
+    win_data_cache: HashMap<u32, winapi::WinProcessData>,
+    win_data_cache_ticks: u64,
     /// Exponential moving averages for load approximation
     load_samples_1: f64,
     load_samples_5: f64,
@@ -22,19 +25,23 @@ pub struct Collector {
 
 impl Collector {
     pub fn new() -> Self {
-        let mut sys = System::new_all();
-        sys.refresh_all();
-        // Need an initial measurement for CPU deltas
-        std::thread::sleep(std::time::Duration::from_millis(250));
-        sys.refresh_all();
+        let mut sys = System::new();
+        // Only refresh what we need initially
+        sys.refresh_cpu_all();
+        sys.refresh_memory();
+        
+        // Need an initial CPU measurement for deltas
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        sys.refresh_cpu_all();
 
-        let mut users = Users::new();
-        users.refresh();
+        let users = Users::new_with_refreshed_list();
 
         Self {
             sys,
             users,
             user_cache: HashMap::new(),
+            win_data_cache: HashMap::new(),
+            win_data_cache_ticks: 0,
             load_samples_1: 0.0,
             load_samples_5: 0.0,
             load_samples_15: 0.0,
@@ -47,7 +54,10 @@ impl Collector {
             return; // Z key: freeze display
         }
 
-        self.sys.refresh_all();
+        // Refresh only what we need - much faster than refresh_all()
+        self.sys.refresh_cpu_all();
+        self.sys.refresh_memory();
+        self.sys.refresh_processes(ProcessesToUpdate::All, true);
 
         self.collect_cpu(app);
         self.collect_memory(app);
@@ -157,8 +167,14 @@ impl Collector {
             .collect();
 
         // Batch-collect Windows-specific data (priority, thread counts)
-        let all_pids: Vec<u32> = raw_procs.iter().map(|(pid, ..)| *pid).collect();
-        let win_data = winapi::collect_process_data(&all_pids);
+        // Only refresh every 3 ticks to reduce expensive Win32 API overhead
+        if self.win_data_cache_ticks == 0 || self.win_data_cache_ticks % 3 == 0 {
+            let all_pids: Vec<u32> = raw_procs.iter().map(|(pid, ..)| *pid).collect();
+            self.win_data_cache = winapi::collect_process_data(&all_pids);
+        }
+        self.win_data_cache_ticks += 1;
+        // Clone the cache to avoid borrow checker issues
+        let win_data = self.win_data_cache.clone();
 
         // Now resolve users (needs &mut self for cache) and merge Win32 data
         let processes: Vec<ProcessInfo> = raw_procs.into_iter()

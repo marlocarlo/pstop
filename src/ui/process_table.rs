@@ -13,6 +13,7 @@ use crate::system::process::ProcessSortField;
 /// Note: I/O columns are shown when available (optional in htop via F2 setup)
 const HEADERS: &[(&str, u16, ProcessSortField)] = &[
     ("PID",        7,  ProcessSortField::Pid),
+    ("PPID",       7,  ProcessSortField::Ppid),
     ("USER",       9,  ProcessSortField::User),
     ("PRI",        4,  ProcessSortField::Priority),
     ("NI",         4,  ProcessSortField::Nice),
@@ -260,9 +261,10 @@ fn build_process_row(
     let base_style = Style::default().bg(bg);
 
     // Build spans matching htop's exact column order:
-    // PID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ IO_R IO_W Command
+    // PID PPID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ IO_R IO_W Command
     let mut spans = vec![
         Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)),
+        Span::styled(format!("{:>6} ", proc.ppid), base_style.fg(Color::Green)),
         Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(Color::LightCyan)),
         Span::styled(format!("{:>3} ", proc.priority), base_style.fg(Color::White)),
         Span::styled(format!("{:>3} ", proc.nice), base_style.fg(Color::White)),

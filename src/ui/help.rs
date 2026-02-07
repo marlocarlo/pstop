@@ -41,6 +41,7 @@ pub fn draw_help(f: &mut Frame) {
         Line::from(""),
         Line::from(Span::styled(" Actions ", Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow))),
         Line::from("  u           Filter by user"),
+        Line::from("  a           Set CPU affinity"),
         Line::from("  F           Follow selected process"),
         Line::from("  Space       Tag/untag process"),
         Line::from("  c           Tag process + all children"),

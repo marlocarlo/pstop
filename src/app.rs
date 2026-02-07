@@ -14,6 +14,7 @@ pub enum AppMode {
     SortSelect,
     Kill,
     UserFilter,
+    Affinity,    // a: CPU affinity selector
 }
 
 /// Main application state
@@ -84,6 +85,9 @@ pub struct App {
     // Kill mode signal selection
     pub kill_signal_index: usize,
 
+    // CPU affinity mode
+    pub affinity_cpus: Vec<bool>, // CPU selection state (true = enabled)
+
     // Tick counter for refresh
     pub tick: u64,
 }
@@ -115,7 +119,7 @@ impl App {
 
             sort_field: ProcessSortField::Cpu,
             sort_ascending: false,
-            sort_menu_index: 8, // CPU% index in all()
+            sort_menu_index: 9, // CPU% index in all() (0=PID,1=PPID,2=USER,3=PRI,4=NI,5=VIRT,6=RES,7=SHR,8=STATUS,9=CPU)
 
             search_query: String::new(),
             filter_query: String::new(),
@@ -145,6 +149,8 @@ impl App {
 
             kill_signal_index: 1, // Default to SIGKILL (force) on Windows
 
+            affinity_cpus: Vec::new(),
+
             tick: 0,
         }
     }
@@ -157,6 +163,7 @@ impl App {
         self.filtered_processes.sort_by(|a, b| {
             let ord = match field {
                 ProcessSortField::Pid => a.pid.cmp(&b.pid),
+                ProcessSortField::Ppid => a.ppid.cmp(&b.ppid),
                 ProcessSortField::User => a.user.to_lowercase().cmp(&b.user.to_lowercase()),
                 ProcessSortField::Priority => a.priority.cmp(&b.priority),
                 ProcessSortField::Nice => a.nice.cmp(&b.nice),

@@ -14,6 +14,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent) {
         AppMode::SortSelect => handle_sort_mode(app, key),
         AppMode::Kill      => handle_kill_mode(app, key),
         AppMode::UserFilter => handle_user_filter_mode(app, key),
+        AppMode::Affinity  => handle_affinity_mode(app, key),
     }
 }
 
@@ -162,6 +163,21 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
 
         // ── Toggle full path display (htop 'p') ──
         KeyCode::Char('p') => app.show_full_path = !app.show_full_path,
+
+        // ── CPU affinity (htop 'a') ──
+        KeyCode::Char('a') => {
+            if let Some(proc) = app.selected_process() {
+                let cpu_count = winapi::get_cpu_count();
+                let (proc_mask, _sys_mask, success) = winapi::get_process_affinity(proc.pid);
+                if success {
+                    // Initialize affinity_cpus based on current mask
+                    app.affinity_cpus = (0..cpu_count)
+                        .map(|i| (proc_mask & (1 << i)) != 0)
+                        .collect();
+                    app.mode = AppMode::Affinity;
+                }
+            }
+        }
 
         // ── Number keys: quick PID search ──
         KeyCode::Char(c) if c.is_ascii_digit() => {
@@ -346,6 +362,54 @@ fn handle_user_filter_mode(app: &mut App, key: KeyEvent) {
             if app.tree_view { app.build_tree_view(); }
             app.clamp_selection();
             app.mode = AppMode::Normal;
+        }
+        _ => {}
+    }
+}
+
+// ── CPU Affinity mode ───────────────────────────────────────────────────
+
+fn handle_affinity_mode(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.mode = AppMode::Normal;
+        }
+        KeyCode::Enter => {
+            // Apply the affinity mask
+            if let Some(proc) = app.selected_process() {
+                let mut mask: usize = 0;
+                for (i, &enabled) in app.affinity_cpus.iter().enumerate() {
+                    if enabled {
+                        mask |= 1 << i;
+                    }
+                }
+                if mask != 0 {
+                    let _ = winapi::set_process_affinity(proc.pid, mask);
+                }
+            }
+            app.mode = AppMode::Normal;
+        }
+        KeyCode::Char(' ') => {
+            // Space: toggle CPU 0
+            if !app.affinity_cpus.is_empty() {
+                app.affinity_cpus[0] = !app.affinity_cpus[0];
+            }
+        }
+        KeyCode::Char(c) if c.is_ascii_digit() => {
+            // Number key: toggle specific CPU
+            if let Some(cpu_idx) = c.to_digit(10) {
+                let idx = cpu_idx as usize;
+                if idx < app.affinity_cpus.len() {
+                    app.affinity_cpus[idx] = !app.affinity_cpus[idx];
+                }
+            }
+        }
+        KeyCode::Char('a') => {
+            // Toggle all CPUs
+            let all_on = app.affinity_cpus.iter().all(|&x| x);
+            for cpu in &mut app.affinity_cpus {
+                *cpu = !all_on;
+            }
         }
         _ => {}
     }

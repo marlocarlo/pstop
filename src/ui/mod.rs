@@ -5,6 +5,7 @@ pub mod help;
 pub mod sort_menu;
 pub mod kill_menu;
 pub mod user_menu;
+pub mod affinity_menu;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -46,6 +47,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         AppMode::SortSelect => sort_menu::draw_sort_menu(f, app),
         AppMode::Kill => kill_menu::draw_kill_menu(f, app),
         AppMode::UserFilter => user_menu::draw_user_menu(f, app),
+        AppMode::Affinity => affinity_menu::draw_affinity_menu(f, app),
         _ => {}
     }
 }

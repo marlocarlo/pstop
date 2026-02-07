@@ -3,6 +3,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessSortField {
     Pid,
+    Ppid,
     User,
     Priority,
     Nice,
@@ -24,6 +25,7 @@ impl ProcessSortField {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Pid => "PID",
+            Self::Ppid => "PPID",
             Self::User => "USER",
             Self::Priority => "PRI",
             Self::Nice => "NI",
@@ -45,6 +47,7 @@ impl ProcessSortField {
     pub fn long_label(&self) -> &'static str {
         match self {
             Self::Pid => "PID",
+            Self::Ppid => "PPID",
             Self::User => "USER",
             Self::Priority => "PRIORITY",
             Self::Nice => "NICE",
@@ -66,6 +69,7 @@ impl ProcessSortField {
     pub fn all() -> &'static [ProcessSortField] {
         &[
             Self::Pid,
+            Self::Ppid,
             Self::User,
             Self::Priority,
             Self::Nice,

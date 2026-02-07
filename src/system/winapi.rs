@@ -13,6 +13,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 };
 use windows::Win32::System::Threading::{
     GetPriorityClass, OpenProcess, SetPriorityClass, GetProcessIoCounters,
+    GetProcessAffinityMask, SetProcessAffinityMask,
     ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS,
     HIGH_PRIORITY_CLASS, IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
     REALTIME_PRIORITY_CLASS, PROCESS_QUERY_INFORMATION, PROCESS_SET_INFORMATION,
@@ -219,4 +220,70 @@ fn change_priority(pid: u32, raise: bool) -> bool {
         let _ = CloseHandle(handle);
         success
     }
+}
+
+/// Get CPU affinity mask for a process
+/// Returns (process_affinity, system_affinity, success)
+/// The masks are bit arrays where each bit represents a CPU core
+pub fn get_process_affinity(pid: u32) -> (usize, usize, bool) {
+    if pid == 0 || pid == 4 {
+        return (0, 0, false);
+    }
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_INFORMATION, false, pid);
+        let handle = match handle {
+            Ok(h) => h,
+            Err(_) => return (0, 0, false),
+        };
+
+        let mut process_mask: usize = 0;
+        let mut system_mask: usize = 0;
+        
+        let result = GetProcessAffinityMask(
+            handle,
+            &mut process_mask as *mut _,
+            &mut system_mask as *mut _,
+        );
+
+        let _ = CloseHandle(handle);
+
+        if result.is_ok() {
+            (process_mask, system_mask, true)
+        } else {
+            (0, 0, false)
+        }
+    }
+}
+
+/// Set CPU affinity mask for a process
+/// mask: bit array where each bit represents a CPU core (bit 0 = CPU 0, bit 1 = CPU 1, etc.)
+pub fn set_process_affinity(pid: u32, mask: usize) -> bool {
+    if pid == 0 || pid == 4 || mask == 0 {
+        return false;
+    }
+
+    unsafe {
+        let handle = OpenProcess(
+            PROCESS_QUERY_INFORMATION | PROCESS_SET_INFORMATION,
+            false,
+            pid,
+        );
+        let handle = match handle {
+            Ok(h) => h,
+            Err(_) => return false,
+        };
+
+        let result = SetProcessAffinityMask(handle, mask);
+
+        let _ = CloseHandle(handle);
+        result.is_ok()
+    }
+}
+
+/// Get the number of CPU cores in the system
+pub fn get_cpu_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
 }

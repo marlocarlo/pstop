@@ -9,6 +9,7 @@ pub mod affinity_menu;
 pub mod environment_view;
 pub mod setup_menu;
 pub mod handles_view;
+pub mod io_priority_menu;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -54,6 +55,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         AppMode::Affinity => affinity_menu::draw_affinity_menu(f, app),
         AppMode::Environment => environment_view::draw_environment_view(f, app),
         AppMode::Handles => handles_view::draw_handles_view(f, app),
+        AppMode::IoPriority => io_priority_menu::draw_io_priority_menu(f, app),
         _ => {}
     }
 }

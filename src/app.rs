@@ -18,6 +18,7 @@ pub enum AppMode {
     Environment, // e: show process details/environment
     Setup,       // F2: setup menu (column/display configuration)
     Handles,     // l: list open files/handles (lsof equivalent)
+    IoPriority,  // i: I/O priority selector
 }
 
 /// Main application state
@@ -91,6 +92,9 @@ pub struct App {
     // CPU affinity mode
     pub affinity_cpus: Vec<bool>, // CPU selection state (true = enabled)
 
+    // I/O priority menu
+    pub io_priority_index: usize,
+
     // Column visibility (F2 Setup menu)
     pub visible_columns: std::collections::HashSet<ProcessSortField>,
     pub setup_menu_index: usize,
@@ -157,6 +161,8 @@ impl App {
             kill_signal_index: 1, // Default to SIGKILL (force) on Windows
 
             affinity_cpus: Vec::new(),
+
+            io_priority_index: 0,
 
             // Default visible columns (htop default set)
             visible_columns: [

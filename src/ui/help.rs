@@ -45,6 +45,7 @@ pub fn draw_help(f: &mut Frame) {
         Line::from("  a           Set CPU affinity"),
         Line::from("  e           Show process details"),
         Line::from("  l           List open files/handles (lsof)"),
+        Line::from("  i           Set I/O priority (background mode)"),
         Line::from("  F           Follow selected process"),
         Line::from("  Space       Tag/untag process"),
         Line::from("  c           Tag process + all children"),

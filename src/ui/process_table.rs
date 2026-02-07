@@ -27,6 +27,7 @@ const HEADERS: &[(&str, u16, ProcessSortField)] = &[
     ("THR",        4,  ProcessSortField::Threads),
     ("IO_R",      10,  ProcessSortField::IoReadRate),   // htop: DISK READ
     ("IO_W",      10,  ProcessSortField::IoWriteRate),  // htop: DISK WRITE
+    ("IO_RATE",   10,  ProcessSortField::IoRate),       // htop: DISK R/W (combined)
     ("Command",    0,  ProcessSortField::Command), // 0 = takes remaining space
 ];
 
@@ -324,6 +325,10 @@ fn build_process_row(
     }
     if app.visible_columns.contains(&ProcessSortField::IoWriteRate) {
         spans.push(Span::styled(format!("{:>9} ", format_io_rate(proc.io_write_rate)), base_style.fg(Color::Magenta)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::IoRate) {
+        let total_io = proc.io_read_rate + proc.io_write_rate;
+        spans.push(Span::styled(format!("{:>9} ", format_io_rate(total_io)), base_style.fg(Color::Cyan)));
     }
 
     // Command with basename highlighting (htop shows the process name in a different color)

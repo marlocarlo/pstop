@@ -18,6 +18,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent) {
         AppMode::Environment => handle_environment_mode(app, key),
         AppMode::Setup     => handle_setup_mode(app, key),
         AppMode::Handles   => handle_handles_mode(app, key),
+        AppMode::IoPriority => handle_io_priority_mode(app, key),
     }
 }
 
@@ -199,6 +200,14 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Char('l') => {
             if app.selected_process().is_some() {
                 app.mode = AppMode::Handles;
+            }
+        }
+
+        // ── Set I/O priority (htop 'i') ──
+        KeyCode::Char('i') => {
+            if app.selected_process().is_some() {
+                app.io_priority_index = 0;
+                app.mode = AppMode::IoPriority;
             }
         }
 
@@ -456,6 +465,40 @@ fn handle_handles_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Esc | KeyCode::Char('l') | KeyCode::Char('q') | KeyCode::Enter => {
             app.mode = AppMode::Normal;
         }
+        _ => {}
+    }
+}
+
+// ── I/O priority mode (i) ────────────────────────────────────────────────
+
+fn handle_io_priority_mode(app: &mut App, key: KeyEvent) {
+    use crate::system::winapi;
+
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => {
+            app.mode = AppMode::Normal;
+        }
+
+        KeyCode::Up | KeyCode::Char('k') => {
+            if app.io_priority_index > 0 {
+                app.io_priority_index -= 1;
+            }
+        }
+
+        KeyCode::Down | KeyCode::Char('j') => {
+            if app.io_priority_index < 1 {
+                app.io_priority_index += 1;
+            }
+        }
+
+        KeyCode::Enter => {
+            if let Some(proc) = app.selected_process() {
+                let background_mode = app.io_priority_index == 1;
+                winapi::set_io_priority_background(proc.pid, background_mode);
+            }
+            app.mode = AppMode::Normal;
+        }
+
         _ => {}
     }
 }

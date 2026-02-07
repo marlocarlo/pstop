@@ -9,10 +9,10 @@
 </pre>
 </p>
 
-<h3 align="center">The <code>htop</code> alternative Windows deserves.</h3>
+<h3 align="center">The <code>htop</code> alternative for Windows PowerShell.</h3>
 
 <p align="center">
-  <strong>A beautiful, fast, real-time system monitor for Windows PowerShell — built entirely in Rust.</strong>
+  <strong>Beautiful, fast, real-time system monitor for Windows. Built in Rust.</strong>
 </p>
 
 <p align="center">
@@ -34,14 +34,14 @@
 ---
 
 <p align="center">
-  <img src="image.png" alt="pstop screenshot — htop for Windows" width="900"/>
+  <img src="image.png" alt="pstop screenshot - htop for Windows PowerShell" width="900"/>
 </p>
 
 ---
 
 ## Why pstop?
 
-If you've ever missed `htop` on Windows, your search is over. **pstop** brings the full htop experience to Windows PowerShell — no WSL, no Cygwin, no compromises.
+If you've ever missed `htop` on Windows, your search is over. **pstop** brings the full htop experience to Windows PowerShell. No WSL, no Cygwin, no compromises.
 
 | | **pstop** | Task Manager | `Get-Process` |
 |---|:---:|:---:|:---:|
@@ -66,7 +66,7 @@ If you've ever missed `htop` on Windows, your search is over. **pstop** brings t
 cargo install --git https://github.com/marlocarlo/pstop
 ```
 
-This installs **both** `pstop` and `htop` commands. Yes — you can just type `htop` on Windows.
+This installs **both** `pstop` and `htop` commands. Yes, you can just type `htop` on Windows.
 
 ### Build Locally
 
@@ -103,30 +103,30 @@ Real-time CPU usage bars for every logical core, color-coded by usage type (user
 Press `F5` or `t` to toggle process tree view — see parent-child relationships with `├─` / `└─` tree connectors, collapsible nodes with `+`/`-`.
 
 ### 🔍 Search & Filter
-- **F3** — Incremental search: jumps to matching process
-- **F4** — Filter: hides all non-matching processes in real-time
+- **F3** - Incremental search: jumps to matching process
+- **F4** - Filter: hides all non-matching processes in real-time
 
 ### 📋 Three Tab Views
-- **Main** — Full process table (PID, USER, CPU%, MEM%, TIME+, Command…)
-- **I/O** — Disk read/write rates per process
-- **Net** — Network I/O focused view
+- **Main** - Full process table (PID, USER, CPU%, MEM%, TIME+, Command...)
+- **I/O** - Disk read/write rates per process
+- **Net** - Network I/O focused view
 
 ### ⚙️ F2 Setup Menu (Full htop Parity)
 Press `F2` to open the setup menu with 4 categories:
-- **Meters** — Configure header layout (CPU, Memory, Swap, Network, Tasks, Load, Uptime)
-- **Display Options** — 14 toggleable settings (tree view, highlight basename, shadow other users, show threads, detailed CPU time, and more)
-- **Colors** — Choose from 7 built-in color schemes with **live preview**
-- **Columns** — Add/remove/reorder visible columns
+- **Meters** - Configure header layout (CPU, Memory, Swap, Network, Tasks, Load, Uptime)
+- **Display Options** - 14 toggleable settings (tree view, highlight basename, shadow other users, show threads, detailed CPU time, and more)
+- **Colors** - Choose from 7 built-in color schemes with **live preview**
+- **Columns** - Add/remove/reorder visible columns
 
 ### 🎨 7 Color Schemes
-Switch instantly in F2 → Colors:
-1. **Default** — Classic htop green/cyan on black
-2. **Monochrome** — Pure white on black
-3. **Black Night** — Muted tones for dark terminals
-4. **Light Terminal** — Optimized for light backgrounds
-5. **Midnight Commander** — Blue background, MC-inspired
-6. **Black on White** — Clean light theme
-7. **Dark Vivid** — High-contrast neon colors
+Switch instantly in F2 > Colors:
+1. **Default** - Classic htop green/cyan on black
+2. **Monochrome** - Pure white on black
+3. **Black Night** - Muted tones for dark terminals
+4. **Light Terminal** - Optimized for light backgrounds
+5. **Midnight Commander** - Blue background, MC-inspired
+6. **Black on White** - Clean light theme
+7. **Dark Vivid** - High-contrast neon colors
 
 ### 🖱️ Full Mouse Support
 - Click anywhere in the process table to select
@@ -139,7 +139,7 @@ Switch instantly in F2 → Colors:
 Familiar htop keybindings — zero learning curve if you know htop.
 
 ### 💾 Persistent Configuration
-All settings auto-save to `%APPDATA%/pstop/pstoprc` and restore on next launch. Your color scheme, display options, column choices, sort preference — everything persists.
+All settings auto-save to `%APPDATA%/pstop/pstoprc` and restore on next launch. Your color scheme, display options, column choices, sort preference... everything persists.
 
 ### ⚡ Performance
 - ~1 MB single binary (release build with LTO + strip)
@@ -196,7 +196,7 @@ All 7 schemes affect every UI element — header bars, process table, footer, ta
 | Black on White | Maximum readability on light bg |
 | Dark Vivid | High contrast, colorful |
 
-Change schemes live: `F2` → Colors → select → `Enter`. Preview updates in real-time.
+Change schemes live: `F2` > Colors > select > `Enter`. Preview updates in real-time.
 
 ---
 
@@ -240,10 +240,10 @@ Format: simple `key=value` (htoprc-style). Persisted settings include:
 ## Contributing
 
 Contributions welcome! This is a Rust project using:
-- **ratatui** 0.29 — TUI framework
-- **crossterm** 0.28 — Terminal backend
-- **sysinfo** 0.33 — System information
-- **windows** 0.58 — Native Win32 APIs
+- **ratatui** 0.29 - TUI framework
+- **crossterm** 0.28 - Terminal backend
+- **sysinfo** 0.33 - System information
+- **windows** 0.58 - Native Win32 APIs
 
 ```powershell
 git clone https://github.com/marlocarlo/pstop.git
@@ -255,7 +255,7 @@ cargo run
 
 ## License
 
-[MIT](LICENSE) — use it, fork it, ship it.
+[MIT](LICENSE) - use it, fork it, ship it.
 
 ---
 

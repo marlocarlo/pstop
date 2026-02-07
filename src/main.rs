@@ -14,7 +14,10 @@
 #![allow(dead_code)]
 
 mod app;
+pub mod color_scheme;
+mod config;
 mod input;
+mod mouse;
 mod system;
 mod ui;
 
@@ -36,6 +39,31 @@ use system::collector::Collector;
 const TICK_RATE_MS: u64 = 1500;
 
 fn main() -> Result<()> {
+    // Handle CLI flags before entering TUI mode
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 {
+        match args[1].as_str() {
+            "--install-alias" => {
+                return install_htop_alias();
+            }
+            "--help" | "-h" => {
+                println!("pstop — An htop-like system monitor for Windows");
+                println!();
+                println!("Usage: pstop [OPTIONS]");
+                println!();
+                println!("Options:");
+                println!("  --install-alias   Add 'htop' alias to your PowerShell profile");
+                println!("  --help, -h        Show this help message");
+                return Ok(());
+            }
+            _ => {
+                eprintln!("Unknown option: {}", args[1]);
+                eprintln!("Run 'pstop --help' for usage information.");
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -69,7 +97,11 @@ fn main() -> Result<()> {
 fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     let mut app = App::new();
     let mut collector = Collector::new();
-    let tick_rate = Duration::from_millis(TICK_RATE_MS);
+
+    // Load saved configuration
+    let cfg = config::PstopConfig::load();
+    cfg.apply_to(&mut app);
+
     let mut last_tick = Instant::now();
 
     // Initial data collection
@@ -92,6 +124,8 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
 
         // Check if we should quit before waiting for events
         if app.should_quit {
+            // Save configuration on quit
+            let _ = config::PstopConfig::from_app(&app).save();
             return Ok(());
         }
 
@@ -107,16 +141,16 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
                         input::handle_input(&mut app, key);
                         // Immediate redraw after user input for responsiveness
                         if app.should_quit {
+                            let _ = config::PstopConfig::from_app(&app).save();
                             return Ok(());
                         }
                     }
                 }
-                Event::Mouse(mouse) => {
-                    use crossterm::event::{MouseEventKind};
-                    match mouse.kind {
-                        MouseEventKind::ScrollUp => app.select_prev(),
-                        MouseEventKind::ScrollDown => app.select_next(),
-                        _ => {}
+                Event::Mouse(mouse_event) => {
+                    mouse::handle_mouse(&mut app, mouse_event, size.width, size.height);
+                    if app.should_quit {
+                        let _ = config::PstopConfig::from_app(&app).save();
+                        return Ok(());
                     }
                 }
                 Event::Resize(_, _) => {
@@ -128,7 +162,8 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
 
         // Check if it's time to refresh system data
         let now = Instant::now();
-        if now.duration_since(last_tick) >= tick_rate {
+        let dynamic_tick = Duration::from_millis(app.update_interval_ms);
+        if now.duration_since(last_tick) >= dynamic_tick {
             should_refresh = true;
             last_tick = now;
         }
@@ -137,4 +172,59 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
             collector.refresh(&mut app);
         }
     }
+}
+
+/// Install 'htop' alias for pstop in the user's PowerShell profile.
+/// Writes `Set-Alias htop pstop` to the profile file, creating it if needed.
+fn install_htop_alias() -> Result<()> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    // Get the PowerShell profile path via $PROFILE
+    let output = std::process::Command::new("pwsh")
+        .args(["-NoProfile", "-Command", "echo $PROFILE"])
+        .output()
+        .or_else(|_| {
+            // Fall back to powershell.exe (Windows PowerShell 5.x)
+            std::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command", "echo $PROFILE"])
+                .output()
+        })?;
+
+    let profile_path_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if profile_path_str.is_empty() {
+        anyhow::bail!("Could not determine PowerShell profile path. Is PowerShell installed?");
+    }
+
+    let profile_path = PathBuf::from(&profile_path_str);
+    let alias_line = "Set-Alias htop pstop";
+
+    // Check if alias already exists in profile
+    if profile_path.exists() {
+        let content = fs::read_to_string(&profile_path)?;
+        if content.contains(alias_line) {
+            println!("✓ 'htop' alias already exists in {}", profile_path_str);
+            return Ok(());
+        }
+    } else {
+        // Create parent directories if needed
+        if let Some(parent) = profile_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+
+    // Append the alias to the profile
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&profile_path)?;
+    writeln!(file)?; // blank line separator
+    writeln!(file, "# pstop: htop alias for Windows")?;
+    writeln!(file, "{}", alias_line)?;
+
+    println!("✓ Added 'htop' alias to {}", profile_path_str);
+    println!("  Restart PowerShell or run: . $PROFILE");
+
+    Ok(())
 }

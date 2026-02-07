@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -50,10 +50,11 @@ const FKEYS_FILTER: &[(&str, &str)] = &[
 /// Draw the bottom F-key bar (exact htop styling)
 /// htop uses: Fn key in black-on-cyan, description in white-on-black
 pub fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
+    let cs = &app.color_scheme;
     // Full-width dark background first
     let bg_fill = " ".repeat(area.width as usize);
     f.render_widget(
-        Paragraph::new(bg_fill).style(Style::default().bg(Color::Indexed(234))),
+        Paragraph::new(bg_fill).style(Style::default().bg(cs.footer_label_bg)),
         area,
     );
 
@@ -69,20 +70,20 @@ pub fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         if key.is_empty() {
             continue;
         }
-        // Key label: black text on cyan background (htop style)
+        // Key label: styled per color scheme
         spans.push(Span::styled(
             key.to_string(),
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
+                .fg(cs.footer_key_fg)
+                .bg(cs.footer_key_bg)
                 .add_modifier(Modifier::BOLD),
         ));
-        // Description: white text on dark background
+        // Description: styled per color scheme
         spans.push(Span::styled(
             desc.to_string(),
             Style::default()
-                .fg(Color::Indexed(252))  // light gray
-                .bg(Color::Indexed(234)), // very dark gray
+                .fg(cs.footer_label_fg)
+                .bg(cs.footer_label_bg),
         ));
     }
 

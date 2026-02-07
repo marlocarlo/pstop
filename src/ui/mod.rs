@@ -20,9 +20,9 @@ use crate::app::{App, AppMode};
 pub fn header_height(app: &App) -> u16 {
     let cores = app.cpu_info.cores.len();
     let half = (cores + 1) / 2;
-    // Left column: half cores + Mem + Swap
+    // Left column: half cores + Mem + Swap + Net
     // Right column: other half cores + Tasks + Load + Uptime
-    let left_rows = half + 2;
+    let left_rows = half + 3; // +3 for Mem, Swap, Net
     let right_rows = (cores - half) + 3;
     left_rows.max(right_rows) as u16
 }

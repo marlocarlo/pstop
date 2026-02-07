@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use sysinfo::{System, ProcessStatus as SysProcessStatus, ProcessesToUpdate, Users};
+use sysinfo::{System, ProcessStatus as SysProcessStatus, ProcessesToUpdate, Users, Networks};
 
 use crate::app::App;
 use crate::system::cpu::{CpuCore, CpuInfo};
 use crate::system::memory::MemoryInfo;
+use crate::system::network::NetworkInfo;
 use crate::system::process::{ProcessInfo, ProcessStatus};
 use crate::system::winapi;
 
@@ -12,6 +13,7 @@ use crate::system::winapi;
 pub struct Collector {
     sys: System,
     users: Users,
+    networks: Networks,
     /// Cache: sysinfo user_id string -> resolved display name
     user_cache: HashMap<String, String>,
     /// Cache: Win32 process data (priority, threads) - updated every 3 ticks
@@ -19,6 +21,10 @@ pub struct Collector {
     win_data_cache_ticks: u64,
     /// Previous I/O counters for rate calculation: PID -> (read_bytes, write_bytes, timestamp)
     prev_io_counters: HashMap<u32, (u64, u64, std::time::Instant)>,
+    /// Previous network totals for rate calculation
+    prev_net_rx: u64,
+    prev_net_tx: u64,
+    prev_net_time: Option<std::time::Instant>,
     /// Exponential moving averages for load approximation
     load_samples_1: f64,
     load_samples_5: f64,
@@ -37,14 +43,19 @@ impl Collector {
         sys.refresh_cpu_all();
 
         let users = Users::new_with_refreshed_list();
+        let networks = Networks::new_with_refreshed_list();
 
         Self {
             sys,
             users,
+            networks,
             user_cache: HashMap::new(),
             win_data_cache: HashMap::new(),
             win_data_cache_ticks: 0,
             prev_io_counters: HashMap::new(),
+            prev_net_rx: 0,
+            prev_net_tx: 0,
+            prev_net_time: None,
             load_samples_1: 0.0,
             load_samples_5: 0.0,
             load_samples_15: 0.0,
@@ -64,6 +75,7 @@ impl Collector {
 
         self.collect_cpu(app);
         self.collect_memory(app);
+        self.collect_network(app);
         self.collect_processes(app);
         self.collect_uptime(app);
         self.compute_load_average(app);
@@ -133,6 +145,45 @@ impl Collector {
         };
     }
 
+    fn collect_network(&mut self, app: &mut App) {
+        // Refresh network data (true = reset delta counters)
+        self.networks.refresh(true);
+
+        let now = std::time::Instant::now();
+
+        // Sum across all interfaces
+        let mut total_rx: u64 = 0;
+        let mut total_tx: u64 = 0;
+        for (_name, data) in self.networks.iter() {
+            total_rx += data.total_received();
+            total_tx += data.total_transmitted();
+        }
+
+        let (rx_rate, tx_rate) = if let Some(prev_time) = self.prev_net_time {
+            let elapsed = now.duration_since(prev_time).as_secs_f64();
+            if elapsed > 0.0 {
+                let rx = (total_rx.saturating_sub(self.prev_net_rx)) as f64 / elapsed;
+                let tx = (total_tx.saturating_sub(self.prev_net_tx)) as f64 / elapsed;
+                (rx, tx)
+            } else {
+                (0.0, 0.0)
+            }
+        } else {
+            (0.0, 0.0)
+        };
+
+        self.prev_net_rx = total_rx;
+        self.prev_net_tx = total_tx;
+        self.prev_net_time = Some(now);
+
+        app.network_info = NetworkInfo {
+            rx_bytes_per_sec: rx_rate,
+            tx_bytes_per_sec: tx_rate,
+            total_rx,
+            total_tx,
+        };
+    }
+
     fn collect_processes(&mut self, app: &mut App) {
         let total_mem = self.sys.total_memory();
         let mut running = 0usize;
@@ -171,13 +222,16 @@ impl Collector {
 
         // Batch-collect Windows-specific data (priority, thread counts)
         // Only refresh every 3 ticks to reduce expensive Win32 API overhead
+        let all_pids: Vec<u32> = raw_procs.iter().map(|(pid, ..)| *pid).collect();
         if self.win_data_cache_ticks == 0 || self.win_data_cache_ticks % 3 == 0 {
-            let all_pids: Vec<u32> = raw_procs.iter().map(|(pid, ..)| *pid).collect();
             self.win_data_cache = winapi::collect_process_data(&all_pids);
         }
         self.win_data_cache_ticks += 1;
         // Clone the cache to avoid borrow checker issues
         let win_data = self.win_data_cache.clone();
+
+        // I/O counters MUST be fetched every tick for accurate rate calculation
+        let io_counters = winapi::batch_io_counters(&all_pids);
 
         // Now resolve users (needs &mut self for cache) and merge Win32 data
         let processes: Vec<ProcessInfo> = raw_procs.into_iter()
@@ -209,8 +263,7 @@ impl Collector {
                 total_threads += threads as usize;
 
                 // Calculate I/O rates based on difference from previous tick
-                let io_read_bytes = wd.map(|d| d.io_read_bytes).unwrap_or(0);
-                let io_write_bytes = wd.map(|d| d.io_write_bytes).unwrap_or(0);
+                let (io_read_bytes, io_write_bytes) = io_counters.get(&pid).copied().unwrap_or((0, 0));
                 let now = std::time::Instant::now();
                 
                 let (io_read_rate, io_write_rate) = if let Some((prev_read, prev_write, prev_time)) = self.prev_io_counters.get(&pid) {

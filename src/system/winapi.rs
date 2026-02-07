@@ -24,15 +24,12 @@ use windows::Win32::System::Threading::{
     IO_COUNTERS,
 };
 
-/// Per-process data collected via Windows API
+/// Per-process data collected via Windows API (cached every N ticks)
 #[derive(Debug, Clone, Default)]
 pub struct WinProcessData {
     pub priority: i32,   // Base priority level (PRI column)
     pub nice: i32,       // Nice-equivalent mapping (NI column)
     pub thread_count: u32,
-    // I/O counters (cumulative bytes)
-    pub io_read_bytes: u64,
-    pub io_write_bytes: u64,
 }
 
 /// Batch-collect Windows-specific process data for all running processes.
@@ -45,16 +42,25 @@ pub fn collect_process_data(pids: &[u32]) -> HashMap<u32, WinProcessData> {
     for &pid in pids {
         let tc = thread_counts.get(&pid).copied().unwrap_or(1);
         let (pri, ni) = get_priority(pid);
-        let (io_read, io_write) = get_io_counters(pid);
         result.insert(pid, WinProcessData {
             priority: pri,
             nice: ni,
             thread_count: tc,
-            io_read_bytes: io_read,
-            io_write_bytes: io_write,
         });
     }
 
+    result
+}
+
+/// Batch-collect I/O counters for all processes.
+/// This is cheap (one syscall per PID) and should run EVERY tick for accurate rate calculation.
+/// Returns HashMap<pid, (read_bytes, write_bytes)>
+pub fn batch_io_counters(pids: &[u32]) -> HashMap<u32, (u64, u64)> {
+    let mut result = HashMap::with_capacity(pids.len());
+    for &pid in pids {
+        let (r, w) = get_io_counters(pid);
+        result.insert(pid, (r, w));
+    }
     result
 }
 

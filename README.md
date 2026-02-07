@@ -1,131 +1,264 @@
-# pstop
+<p align="center">
+<pre>
+██████╗ ███████╗████████╗ ██████╗ ██████╗
+██╔══██╗██╔════╝╚══██╔══╝██╔═══██╗██╔══██╗
+██████╔╝███████╗   ██║   ██║   ██║██████╔╝
+██╔═══╝ ╚════██║   ██║   ██║   ██║██╔═══╝
+██║     ███████║   ██║   ╚██████╔╝██║
+╚═╝     ╚══════╝   ╚═╝    ╚═════╝ ╚═╝
+</pre>
+</p>
 
-An **htop-like** interactive system monitor for **Windows PowerShell**, written entirely in **Rust**. Designed to be a drop-in replacement for htop on Windows with full feature parity.
+<h3 align="center">The <code>htop</code> alternative Windows deserves.</h3>
+
+<p align="center">
+  <strong>A beautiful, fast, real-time system monitor for Windows PowerShell — built entirely in Rust.</strong>
+</p>
+
+<p align="center">
+  <a href="#installation">Install</a> •
+  <a href="#features">Features</a> •
+  <a href="#keybindings">Keys</a> •
+  <a href="#color-schemes">Themes</a> •
+  <a href="#configuration">Config</a> •
+  <a href="#license">License</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-windows-blue?style=flat-square&logo=windows" alt="Windows"/>
+  <img src="https://img.shields.io/badge/language-rust-orange?style=flat-square&logo=rust" alt="Rust"/>
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
+  <img src="https://img.shields.io/badge/terminal-powershell-5391FE?style=flat-square&logo=powershell&logoColor=white" alt="PowerShell"/>
+</p>
+
+---
+
+<p align="center">
+  <img src="image.png" alt="pstop screenshot — htop for Windows" width="900"/>
+</p>
+
+---
+
+## Why pstop?
+
+If you've ever missed `htop` on Windows, your search is over. **pstop** brings the full htop experience to Windows PowerShell — no WSL, no Cygwin, no compromises.
+
+| | **pstop** | Task Manager | `Get-Process` |
+|---|:---:|:---:|:---:|
+| Real-time CPU per-core bars | ✅ | ❌ | ❌ |
+| Memory / Swap / Network bars | ✅ | Partial | ❌ |
+| Tree view (process hierarchy) | ✅ | ❌ | ❌ |
+| Search & filter processes | ✅ | Basic | ❌ |
+| Kill / change priority | ✅ | ✅ | Manual |
+| Mouse support | ✅ | ✅ | ❌ |
+| 7 color schemes | ✅ | ❌ | ❌ |
+| Keyboard-driven | ✅ | ❌ | ❌ |
+| Runs in terminal | ✅ | ❌ | ✅ |
+| ~1 MB binary, zero dependencies | ✅ | N/A | N/A |
+
+---
+
+## Installation
+
+### From Source (Recommended)
+
+```powershell
+cargo install --git https://github.com/marlocarlo/pstop
+```
+
+This installs **both** `pstop` and `htop` commands. Yes — you can just type `htop` on Windows.
+
+### Build Locally
+
+```powershell
+git clone https://github.com/marlocarlo/pstop.git
+cd pstop
+cargo build --release
+# Binary at: target/release/pstop.exe + target/release/htop.exe
+```
+
+### Add htop Alias (Optional)
+
+If you only installed `pstop` and want the `htop` alias in your PowerShell profile:
+
+```powershell
+pstop --install-alias
+```
+
+This adds `Set-Alias htop pstop` to your `$PROFILE` automatically.
+
+---
 
 ## Features
 
-### Display
-- **Per-core CPU bars** — two-column layout with multi-color bars (green=user, red=kernel)
-- **Memory bar** — green (used), blue (buffers), yellow (cache) — matches htop
-- **Swap bar** — color-coded by pressure
-- **Tasks line** — process count, thread count, running count
-- **Load average** — EMA-approximated (Windows doesn't have native load avg)
-- **Uptime** — formatted as `DD days, HH:MM:SS`
-- **17-column process table** — `PID PPID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ THR IO_R IO_W Command`
-- **Column header** — cyan background, green highlight on sorted column with ▲/▼
-- **Tree view** — Unicode connectors (├─ └─ │) with expand/collapse per-node
-- **Search bar** (F3) — jump to match without filtering
-- **Filter bar** (F4) — persistent filter that hides non-matching processes
-- **F-key bar** — htop-style black-on-cyan key labels
+### 🖥️ Per-Core CPU Monitoring
+Real-time CPU usage bars for every logical core, color-coded by usage type (user / system / virtual), exactly like htop.
 
-### Advanced Features
-- **I/O statistics** — Real-time I/O read/write rates per process (via GetProcessIoCounters)
-- **CPU affinity** — View and modify process CPU affinity masks ('a' key)
-- **Process details** — Comprehensive environment/details viewer ('e' key)
-- **Open files/handles** — List loaded modules and handles ('l' key - lsof equivalent)
-- **Column configuration** — F2 Setup menu to show/hide columns like htop
-- **Hide kernel threads** — 'K' key to filter out system/kernel processes
-- **PPID column** — Parent process ID tracking
-- **Thread count** — THR column showing thread count per process
+### 📊 Memory, Swap & Network Bars
+- **Mem** bar: shows used (green), buffers (blue), cached (yellow)
+- **Swap** bar: swap usage with color threshold
+- **Net** bar: live RX/TX throughput in the header
 
-## Keybindings (htop-compatible)
+### 🌳 Tree View
+Press `F5` or `t` to toggle process tree view — see parent-child relationships with `├─` / `└─` tree connectors, collapsible nodes with `+`/`-`.
+
+### 🔍 Search & Filter
+- **F3** — Incremental search: jumps to matching process
+- **F4** — Filter: hides all non-matching processes in real-time
+
+### 📋 Three Tab Views
+- **Main** — Full process table (PID, USER, CPU%, MEM%, TIME+, Command…)
+- **I/O** — Disk read/write rates per process
+- **Net** — Network I/O focused view
+
+### ⚙️ F2 Setup Menu (Full htop Parity)
+Press `F2` to open the setup menu with 4 categories:
+- **Meters** — Configure header layout (CPU, Memory, Swap, Network, Tasks, Load, Uptime)
+- **Display Options** — 14 toggleable settings (tree view, highlight basename, shadow other users, show threads, detailed CPU time, and more)
+- **Colors** — Choose from 7 built-in color schemes with **live preview**
+- **Columns** — Add/remove/reorder visible columns
+
+### 🎨 7 Color Schemes
+Switch instantly in F2 → Colors:
+1. **Default** — Classic htop green/cyan on black
+2. **Monochrome** — Pure white on black
+3. **Black Night** — Muted tones for dark terminals
+4. **Light Terminal** — Optimized for light backgrounds
+5. **Midnight Commander** — Blue background, MC-inspired
+6. **Black on White** — Clean light theme
+7. **Dark Vivid** — High-contrast neon colors
+
+### 🖱️ Full Mouse Support
+- Click anywhere in the process table to select
+- Click column headers to sort
+- Click F-key bar buttons
+- Click tabs to switch views
+- Scroll wheel for navigation
+
+### ⌨️ Keyboard Shortcuts
+Familiar htop keybindings — zero learning curve if you know htop.
+
+### 💾 Persistent Configuration
+All settings auto-save to `%APPDATA%/pstop/pstoprc` and restore on next launch. Your color scheme, display options, column choices, sort preference — everything persists.
+
+### ⚡ Performance
+- ~1 MB single binary (release build with LTO + strip)
+- 50ms event polling for instant keyboard response
+- Configurable refresh rate (200ms–10s)
+- Native Win32 API calls for I/O counters, process priority, CPU affinity
+- Zero runtime dependencies
+
+---
+
+## Keybindings
 
 | Key | Action |
 |-----|--------|
-| **F1** / **h** / **?** | Help |
-| **F2** / **S** | Setup - configure visible columns |
-| **F3** / **/** | Search (jump to match) |
-| **F4** / **\\** | Filter (hide non-matching) |
-| **F5** / **t** | Toggle tree view |
-| **F6** | Sort menu |
-| **F7** | Nice − (raise priority via Win32) |
-| **F8** | Nice + (lower priority via Win32) |
-| **F9** / **k** | Kill process (signal menu) |
-| **F10** / **q** | Quit |
-| ↑ / ↓ / **Alt-k** / **Alt-j** | Navigate |
-| PgUp / PgDn / Home / End | Page / jump navigation |
-| **P** / **M** / **T** / **N** | Sort by CPU / MEM / TIME / PID |
-| **I** | Invert sort order |
-| **<** / **>** | Cycle sort column |
-| **Space** | Tag process |
-| **c** | Tag process + all children |
-| **U** | Untag all |
-| **u** | Filter by user |
-| **a** | Set CPU affinity |
-| **e** | Show process details/environment |
-| **l** | List open files/handles (lsof) |
-| **F** | Follow selected process |
-| **H** | Toggle thread display |
-| **K** | Hide kernel/system threads |
-| **p** | Toggle full command path |
-| **Z** / **z** | Pause / freeze display |
-| **Ctrl+L** | Force refresh |
-| **+** / **-** / **\*** | Expand / collapse / expand-all tree |
-| **0-9** | Quick PID search |
-| **Ctrl+C** | Quit |
+| `F1` / `?` | Help screen |
+| `F2` | Setup menu (meters, display, colors, columns) |
+| `F3` / `/` | Search processes |
+| `F4` / `\` | Filter processes |
+| `F5` / `t` | Toggle tree view |
+| `F6` / `>` | Sort by column |
+| `F7` / `F8` | Decrease / Increase process priority (nice) |
+| `F9` / `k` | Kill process |
+| `F10` / `q` | Quit |
+| `Tab` | Switch between Main / I/O / Net views |
+| `Space` | Tag process |
+| `c` | Tag process and children |
+| `U` | Untag all |
+| `u` | Filter by user |
+| `p` | Toggle full command path / process name |
+| `H` | Toggle show threads |
+| `K` | Toggle hide kernel threads |
+| `+` / `-` | Expand / collapse tree node |
+| `e` | Show process environment |
+| `l` | List open handles (lsof equivalent) |
+| `a` | Set CPU affinity |
+| `I` | Invert sort order |
+| Arrow keys | Navigate |
+| `PgUp` / `PgDn` | Page through process list |
+| `Home` / `End` | Jump to first / last process |
 
-## Windows-specific
+---
 
-- Real process **priority** and **nice** values via Win32 `GetPriorityClass`
-- Real per-process **thread counts** via `CreateToolhelp32Snapshot`
-- **I/O statistics** via `GetProcessIoCounters` — read/write bytes per second
-- **CPU affinity** via `GetProcessAffinityMask` and `SetProcessAffinityMask`
-- **Open handles** enumeration via `EnumProcessModulesEx` and `GetModuleFileNameExW`
-- Priority changes via `SetPriorityClass` (F7/F8)
-- Process kill via `taskkill /F`
-- User resolution from Windows SIDs
-- PPID (Parent PID) tracking via sysinfo
+## Color Schemes
 
-## Building
+All 7 schemes affect every UI element — header bars, process table, footer, tabs, popups:
+
+| Scheme | Best For |
+|--------|----------|
+| Default | Dark terminals (Windows Terminal, Alacritty) |
+| Monochrome | Minimal / accessibility |
+| Black Night | OLED / very dark terminals |
+| Light Terminal | Light-themed terminals |
+| Midnight Commander | Nostalgic blue background |
+| Black on White | Maximum readability on light bg |
+| Dark Vivid | High contrast, colorful |
+
+Change schemes live: `F2` → Colors → select → `Enter`. Preview updates in real-time.
+
+---
+
+## Configuration
+
+Settings are saved automatically to:
+
+```
+%APPDATA%\pstop\pstoprc
+```
+
+Format: simple `key=value` (htoprc-style). Persisted settings include:
+- Color scheme
+- All 14 display options
+- Visible columns
+- Sort field & direction
+- Update interval
+- Tree view state
+
+---
+
+## System Requirements
+
+- **OS**: Windows 10 / 11 (x86_64)
+- **Terminal**: Windows Terminal, PowerShell, cmd.exe, or any terminal with ANSI support
+- **Build**: Rust 1.70+ (for building from source)
+
+---
+
+## Roadmap
+
+- [ ] Publish to crates.io (`cargo install pstop`)
+- [ ] Pre-built binaries via GitHub Releases
+- [ ] winget / scoop / chocolatey packages
+- [ ] GPU monitoring
+- [ ] Network per-process tracking
+- [ ] Custom meter plugins
+
+---
+
+## Contributing
+
+Contributions welcome! This is a Rust project using:
+- **ratatui** 0.29 — TUI framework
+- **crossterm** 0.28 — Terminal backend
+- **sysinfo** 0.33 — System information
+- **windows** 0.58 — Native Win32 APIs
 
 ```powershell
-cargo build --release
+git clone https://github.com/marlocarlo/pstop.git
+cd pstop
+cargo run
 ```
 
-The binary will be at `target/release/pstop.exe` (~800 KB).
-
-## Running
-
-```powershell
-.\target\release\pstop.exe
-```
-
-## Project Structure
-
-```
-src/
-├── main.rs                # Entry point, terminal setup, main loop
-├── app.rs                 # Application state, modes, sorting, filtering, tree
-├── input.rs               # Keyboard input handling for all modes
-├── system/
-│   ├── mod.rs
-│   ├── cpu.rs             # CPU core & aggregate info structs
-│   ├── memory.rs          # Memory/swap info & byte formatting
-│   ├── process.rs         # ProcessInfo, ProcessStatus, ProcessSortField (17 fields)
-│   ├── collector.rs       # System data collection (sysinfo + Win32 + I/O)
-│   └── winapi.rs          # Win32 API: priority, threads, I/O, affinity, handles
-└── ui/
-    ├── mod.rs             # UI layout & draw dispatcher
-    ├── header.rs          # CPU bars, memory bars, tasks/load/uptime
-    ├── process_table.rs   # Process list with 17-column headers
-    ├── footer.rs          # F-key function bar
-    ├── help.rs            # Help overlay popup
-    ├── sort_menu.rs       # Sort-by selection overlay
-    ├── kill_menu.rs       # Kill signal selection overlay
-    ├── user_menu.rs       # User filter selection overlay
-    ├── affinity_menu.rs   # CPU affinity selection overlay
-    ├── environment_view.rs # Process details/environment viewer
-    ├── setup_menu.rs      # F2 column configuration overlay
-    └── handles_view.rs    # Open files/handles viewer (lsof)
-```
-
-## Dependencies
-
-- **[ratatui](https://ratatui.rs)** — TUI rendering framework
-- **[crossterm](https://github.com/crossterm-rs/crossterm)** — Terminal backend
-- **[sysinfo](https://github.com/GuillaumeGomez/sysinfo)** — System data collection
-- **[windows](https://github.com/microsoft/windows-rs)** — Win32 API bindings
+---
 
 ## License
 
-MIT
+[MIT](LICENSE) — use it, fork it, ship it.
+
+---
+
+<p align="center">
+  <strong>Stop opening Task Manager. Type <code>htop</code>.</strong>
+</p>

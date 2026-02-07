@@ -30,8 +30,8 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let left_col = columns[0];
     let right_col = columns[1];
 
-    // Left column: first half of CPU cores + Mem + Swp
-    let left_rows = half + 2; // cpu cores + mem + swap
+    // Left column: first half of CPU cores + Mem + Swp + Net
+    let left_rows = half + 3; // cpu cores + mem + swap + net
     let left_constraints: Vec<Constraint> = std::iter::repeat(Constraint::Length(1))
         .take(left_rows)
         .collect();
@@ -51,10 +51,12 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         .constraints(right_constraints)
         .split(right_col);
 
+    let cs = &app.color_scheme;
+
     // --- Left column: CPU cores 0..half ---
     for i in 0..half {
         if i < cores.len() {
-            draw_cpu_bar(f, &cores[i], left_chunks[i]);
+            draw_cpu_bar(f, &cores[i], left_chunks[i], cs);
         }
     }
 
@@ -64,11 +66,14 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     // --- Left column: Swap bar ---
     draw_swap_bar(f, app, left_chunks[half + 1]);
 
+    // --- Left column: Network bar ---
+    draw_network_bar(f, app, left_chunks[half + 2]);
+
     // --- Right column: CPU cores half..end ---
     for i in 0..right_cpu_count {
         let core_idx = half + i;
         if core_idx < cores.len() {
-            draw_cpu_bar(f, &cores[core_idx], right_chunks[i]);
+            draw_cpu_bar(f, &cores[core_idx], right_chunks[i], cs);
         }
     }
 
@@ -98,40 +103,35 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 ///   Green portion  = 0-60% of usage (user estimate)
 ///   Red portion    = 60-100% of usage (kernel estimate)
 ///   This gives the visual multi-color effect matching htop.
-fn draw_cpu_bar(f: &mut Frame, core: &crate::system::cpu::CpuCore, area: Rect) {
+fn draw_cpu_bar(f: &mut Frame, core: &crate::system::cpu::CpuCore, area: Rect, cs: &crate::color_scheme::ColorScheme) {
     let usage = core.usage_percent;
     let label = format!("{:>2}", core.id);
     let pct_label = format!("{:>5.1}%", usage);
 
     let bar_width = area.width as usize;
-    let prefix_len = label.len() + 1; // "NN "
+    let prefix_len = label.len() + 1;
     let suffix_len = pct_label.len() + 1;
-    let bracket_len = 2; // [ ]
+    let bracket_len = 2;
     let available = bar_width.saturating_sub(prefix_len + suffix_len + bracket_len);
 
     let total_filled = ((usage as f64 / 100.0) * available as f64) as usize;
     let total_filled = total_filled.min(available);
 
-    // Split into green (user ~70%) and red (kernel ~30%) portions
     let green_portion = (total_filled as f64 * 0.7) as usize;
     let red_portion = total_filled.saturating_sub(green_portion);
     let empty = available.saturating_sub(total_filled);
 
-    let green_bar: String = "|".repeat(green_portion);
-    let red_bar: String = "|".repeat(red_portion);
-    let empty_str: String = " ".repeat(empty);
-
     let line = Line::from(vec![
         Span::styled(
             format!("{} ", label),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD),
         ),
-        Span::styled("[", Style::default().fg(Color::White)),
-        Span::styled(green_bar, Style::default().fg(Color::Green)),
-        Span::styled(red_bar, Style::default().fg(Color::Red)),
-        Span::styled(empty_str, Style::default().fg(Color::DarkGray)),
-        Span::styled("]", Style::default().fg(Color::White)),
-        Span::styled(pct_label, Style::default().fg(Color::White)),
+        Span::styled("[", Style::default().fg(cs.cpu_label)),
+        Span::styled("|".repeat(green_portion), Style::default().fg(cs.cpu_bar_normal)),
+        Span::styled("|".repeat(red_portion), Style::default().fg(cs.cpu_bar_system)),
+        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
+        Span::styled("]", Style::default().fg(cs.cpu_label)),
+        Span::styled(pct_label, Style::default().fg(cs.cpu_label)),
     ]);
 
     f.render_widget(Paragraph::new(line), area);
@@ -143,6 +143,7 @@ fn draw_cpu_bar(f: &mut Frame, core: &crate::system::cpu::CpuCore, area: Rect) {
 ///   Yellow = cache pages
 fn draw_memory_bar(f: &mut Frame, app: &App, area: Rect) {
     let mem = &app.memory_info;
+    let cs = &app.color_scheme;
     let total = mem.total_mem as f64;
     if total == 0.0 {
         return;
@@ -168,17 +169,14 @@ fn draw_memory_bar(f: &mut Frame, app: &App, area: Rect) {
     let empty = available.saturating_sub(total_filled);
 
     let line = Line::from(vec![
-        Span::styled(
-            prefix,
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("[", Style::default().fg(Color::White)),
-        Span::styled("|".repeat(green_len), Style::default().fg(Color::Green)),
-        Span::styled("|".repeat(blue_len), Style::default().fg(Color::Blue)),
-        Span::styled("|".repeat(yellow_len), Style::default().fg(Color::Yellow)),
-        Span::styled(" ".repeat(empty), Style::default().fg(Color::DarkGray)),
-        Span::styled("]", Style::default().fg(Color::White)),
-        Span::styled(suffix, Style::default().fg(Color::White)),
+        Span::styled(prefix, Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD)),
+        Span::styled("[", Style::default().fg(cs.cpu_label)),
+        Span::styled("|".repeat(green_len), Style::default().fg(cs.mem_bar_used)),
+        Span::styled("|".repeat(blue_len), Style::default().fg(cs.mem_bar_buffers)),
+        Span::styled("|".repeat(yellow_len), Style::default().fg(cs.mem_bar_cache)),
+        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
+        Span::styled("]", Style::default().fg(cs.cpu_label)),
+        Span::styled(suffix, Style::default().fg(cs.cpu_label)),
     ]);
 
     f.render_widget(Paragraph::new(line), area);
@@ -187,6 +185,7 @@ fn draw_memory_bar(f: &mut Frame, app: &App, area: Rect) {
 /// Draw the swap usage bar (green only, like htop)
 fn draw_swap_bar(f: &mut Frame, app: &App, area: Rect) {
     let mem = &app.memory_info;
+    let cs = &app.color_scheme;
     let total = mem.total_swap as f64;
     let usage_frac = if total > 0.0 { mem.used_swap as f64 / total } else { 0.0 };
 
@@ -203,74 +202,107 @@ fn draw_swap_bar(f: &mut Frame, app: &App, area: Rect) {
     let filled = filled.min(available);
     let empty = available.saturating_sub(filled);
 
-    let color = if usage_frac < 0.5 {
-        Color::Green
-    } else if usage_frac < 0.8 {
-        Color::Yellow
-    } else {
-        Color::Red
-    };
-
     let line = Line::from(vec![
-        Span::styled(
-            prefix,
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("[", Style::default().fg(Color::White)),
-        Span::styled("|".repeat(filled), Style::default().fg(color)),
-        Span::styled(" ".repeat(empty), Style::default().fg(Color::DarkGray)),
-        Span::styled("]", Style::default().fg(Color::White)),
-        Span::styled(suffix, Style::default().fg(Color::White)),
+        Span::styled(prefix, Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD)),
+        Span::styled("[", Style::default().fg(cs.cpu_label)),
+        Span::styled("|".repeat(filled), Style::default().fg(cs.swap_bar)),
+        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
+        Span::styled("]", Style::default().fg(cs.cpu_label)),
+        Span::styled(suffix, Style::default().fg(cs.cpu_label)),
     ]);
 
     f.render_widget(Paragraph::new(line), area);
 }
 
+/// Draw network throughput bar: "Net[||||rx|||tx| 1.2M/s↓ 340K/s↑]"
+fn draw_network_bar(f: &mut Frame, app: &App, area: Rect) {
+    let net = &app.network_info;
+
+    let rx_str = format_rate(net.rx_bytes_per_sec);
+    let tx_str = format_rate(net.tx_bytes_per_sec);
+    let suffix = format!("{}↓ {}↑", rx_str, tx_str);
+
+    let prefix = "Net";
+    let bar_width = area.width as usize;
+    let bracket_len = 2;
+    let available = bar_width.saturating_sub(prefix.len() + suffix.len() + bracket_len + 1);
+
+    // Scale bar based on a dynamic max (auto-scale to peak)
+    let total_rate = net.rx_bytes_per_sec + net.tx_bytes_per_sec;
+    // Use 1 Gbps as visual max for the bar
+    let max_rate = 125_000_000.0_f64; // 1 Gbps in bytes/sec
+
+    let rx_frac = if total_rate > 0.0 { net.rx_bytes_per_sec / max_rate } else { 0.0 };
+    let tx_frac = if total_rate > 0.0 { net.tx_bytes_per_sec / max_rate } else { 0.0 };
+
+    let green_len = ((rx_frac) * available as f64).min(available as f64) as usize;
+    let magenta_len = ((tx_frac) * available as f64).min((available - green_len) as f64) as usize;
+    let total_filled = (green_len + magenta_len).min(available);
+    let empty = available.saturating_sub(total_filled);
+
+    let cs = &app.color_scheme;
+    let line = Line::from(vec![
+        Span::styled(prefix, Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD)),
+        Span::styled("[", Style::default().fg(cs.cpu_label)),
+        Span::styled("|".repeat(green_len), Style::default().fg(cs.cpu_bar_normal)),
+        Span::styled("|".repeat(magenta_len), Style::default().fg(Color::Magenta)),
+        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
+        Span::styled("]", Style::default().fg(cs.cpu_label)),
+        Span::styled(suffix, Style::default().fg(cs.cpu_label)),
+    ]);
+
+    f.render_widget(Paragraph::new(line), area);
+}
+
+/// Format bytes/sec as human-readable rate
+fn format_rate(bytes_per_sec: f64) -> String {
+    if bytes_per_sec >= 1_073_741_824.0 {
+        format!("{:.1} G/s", bytes_per_sec / 1_073_741_824.0)
+    } else if bytes_per_sec >= 1_048_576.0 {
+        format!("{:.1} M/s", bytes_per_sec / 1_048_576.0)
+    } else if bytes_per_sec >= 1024.0 {
+        format!("{:.1} K/s", bytes_per_sec / 1024.0)
+    } else {
+        format!("{:.0} B/s", bytes_per_sec)
+    }
+}
+
 /// Draw: "Tasks: 312, 1024 thr; 5 running"
 fn draw_tasks_line(f: &mut Frame, app: &App, area: Rect) {
+    let cs = &app.color_scheme;
     let line = Line::from(vec![
-        Span::styled("Tasks: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("{}", app.total_tasks), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(", "), Style::default().fg(Color::White)),
-        Span::styled(format!("{}", app.total_threads), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
-        Span::styled(" thr; ", Style::default().fg(Color::White)),
-        Span::styled(format!("{}", app.running_tasks), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        Span::styled(" running", Style::default().fg(Color::White)),
+        Span::styled("Tasks: ", Style::default().fg(cs.info_label).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{}", app.total_tasks), Style::default().fg(cs.info_value).add_modifier(Modifier::BOLD)),
+        Span::styled(", ".to_string(), Style::default().fg(cs.info_value)),
+        Span::styled(format!("{}", app.total_threads), Style::default().fg(cs.info_value).add_modifier(Modifier::BOLD)),
+        Span::styled(" thr; ", Style::default().fg(cs.info_value)),
+        Span::styled(format!("{}", app.running_tasks), Style::default().fg(cs.col_status_running).add_modifier(Modifier::BOLD)),
+        Span::styled(" running", Style::default().fg(cs.info_value)),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
 
 /// Draw: "Load average: 0.28 0.45 0.47"
 fn draw_load_line(f: &mut Frame, app: &App, area: Rect) {
+    let cs = &app.color_scheme;
     let line = Line::from(vec![
-        Span::styled(
-            "Load average: ",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Load average: ", Style::default().fg(cs.info_label).add_modifier(Modifier::BOLD)),
         Span::styled(
             format!("{:.2} ", app.load_avg_1),
-            Style::default().fg(if app.load_avg_1 > app.cpu_info.cores.len() as f64 { Color::Red } else { Color::White }).add_modifier(Modifier::BOLD),
+            Style::default().fg(if app.load_avg_1 > app.cpu_info.cores.len() as f64 { cs.col_cpu_high } else { cs.info_value }).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            format!("{:.2} ", app.load_avg_5),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!("{:.2}", app.load_avg_15),
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(format!("{:.2} ", app.load_avg_5), Style::default().fg(cs.info_value).add_modifier(Modifier::BOLD)),
+        Span::styled(format!("{:.2}", app.load_avg_15), Style::default().fg(cs.info_value).add_modifier(Modifier::BOLD)),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
 
 /// Draw: "Uptime: 05:12:01"
 fn draw_uptime_line(f: &mut Frame, app: &App, area: Rect) {
+    let cs = &app.color_scheme;
     let line = Line::from(vec![
-        Span::styled(
-            "Uptime: ",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(format_uptime(app.uptime_seconds), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("Uptime: ", Style::default().fg(cs.info_label).add_modifier(Modifier::BOLD)),
+        Span::styled(format_uptime(app.uptime_seconds), Style::default().fg(cs.info_value).add_modifier(Modifier::BOLD)),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }

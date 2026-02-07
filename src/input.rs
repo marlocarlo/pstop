@@ -41,18 +41,20 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Home  => app.select_first(),
         KeyCode::End   => app.select_last(),
 
-        // ── Tab key: switch between Main and I/O tabs (htop Tab) ──
+        // ── Tab key: switch between Main, I/O, and Net tabs ──
         KeyCode::Tab => {
             app.active_tab = match app.active_tab {
                 ProcessTab::Main => ProcessTab::Io,
-                ProcessTab::Io => ProcessTab::Main,
+                ProcessTab::Io => ProcessTab::Net,
+                ProcessTab::Net => ProcessTab::Main,
             };
         }
         KeyCode::BackTab => {
             // Shift+Tab goes backwards
             app.active_tab = match app.active_tab {
-                ProcessTab::Main => ProcessTab::Io,
+                ProcessTab::Main => ProcessTab::Net,
                 ProcessTab::Io => ProcessTab::Main,
+                ProcessTab::Net => ProcessTab::Io,
             };
         }
 
@@ -478,45 +480,137 @@ fn handle_handles_mode(app: &mut App, key: KeyEvent) {
 // ── Setup/Configuration mode (F2) ───────────────────────────────────────
 
 fn handle_setup_mode(app: &mut App, key: KeyEvent) {
+    use crate::color_scheme::{ColorScheme, ColorSchemeId};
     let all_fields = ProcessSortField::all();
-    
+    let num_categories = 4usize; // Meters, Display options, Colors, Columns
+    // Max index in content panel per category
+    let max_content_idx = match app.setup_category {
+        0 => 3,  // 4 meters per column
+        1 => 14, // 14 display options + interval row
+        2 => ColorSchemeId::all().len().saturating_sub(1),
+        3 => {
+            let visible_count = all_fields.iter()
+                .filter(|f| app.visible_columns.contains(f))
+                .count();
+            visible_count.saturating_sub(1)
+        }
+        _ => 0,
+    };
+
     match key.code {
         KeyCode::Esc | KeyCode::F(2) | KeyCode::F(10) => {
+            // Save config when exiting setup
+            let _ = crate::config::PstopConfig::from_app(app).save();
             app.mode = AppMode::Normal;
         }
+        // ── Panel switching ──
+        KeyCode::Left => {
+            if app.setup_panel > 0 {
+                app.setup_panel -= 1;
+                app.setup_menu_index = 0;
+            }
+        }
+        KeyCode::Right => {
+            if app.setup_panel < 1 {
+                app.setup_panel += 1;
+                app.setup_menu_index = 0;
+            }
+        }
+        // ── Navigation ──
         KeyCode::Up => {
-            if app.setup_menu_index > 0 {
+            if app.setup_panel == 0 {
+                if app.setup_category > 0 {
+                    app.setup_category -= 1;
+                    app.setup_menu_index = 0;
+                }
+            } else if app.setup_menu_index > 0 {
                 app.setup_menu_index -= 1;
             }
         }
         KeyCode::Down => {
-            if app.setup_menu_index + 1 < all_fields.len() {
+            if app.setup_panel == 0 {
+                if app.setup_category + 1 < num_categories {
+                    app.setup_category += 1;
+                    app.setup_menu_index = 0;
+                }
+            } else if app.setup_menu_index < max_content_idx {
                 app.setup_menu_index += 1;
             }
         }
+        // ── Actions ──
         KeyCode::Char(' ') | KeyCode::Enter => {
-            // Toggle column visibility
-            let field = all_fields[app.setup_menu_index];
-            // Don't allow hiding Command column (always needed)
-            if field != ProcessSortField::Command {
-                if app.visible_columns.contains(&field) {
-                    app.visible_columns.remove(&field);
-                } else {
-                    app.visible_columns.insert(field);
+            if app.setup_panel == 0 {
+                app.setup_panel = 1;
+                app.setup_menu_index = 0;
+            } else {
+                match app.setup_category {
+                    1 => {
+                        // Display options toggles (14 options + interval)
+                        match app.setup_menu_index {
+                            0  => app.show_tree_by_default = !app.show_tree_by_default,
+                            1  => app.shadow_other_users = !app.shadow_other_users,
+                            2  => app.hide_kernel_threads = !app.hide_kernel_threads,
+                            3  => app.highlight_base_name = !app.highlight_base_name,
+                            4  => app.highlight_megabytes = !app.highlight_megabytes,
+                            5  => app.highlight_threads = !app.highlight_threads,
+                            6  => app.header_margin = !app.header_margin,
+                            7  => app.detailed_cpu_time = !app.detailed_cpu_time,
+                            8  => app.cpu_count_from_zero = !app.cpu_count_from_zero,
+                            9  => app.update_process_names = !app.update_process_names,
+                            10 => app.show_thread_names = !app.show_thread_names,
+                            11 => app.show_full_path = !app.show_full_path,
+                            12 => app.show_merged_command = !app.show_merged_command,
+                            13 => app.enable_mouse = !app.enable_mouse,
+                            _ => {} // interval row, use +/-
+                        }
+                    }
+                    2 => {
+                        // Apply color scheme
+                        let new_id = ColorSchemeId::from_index(app.setup_menu_index);
+                        app.color_scheme_id = new_id;
+                        app.color_scheme = ColorScheme::from_id(new_id);
+                    }
+                    3 => {
+                        // Toggle column visibility
+                        let visible_fields: Vec<ProcessSortField> = all_fields.iter()
+                            .filter(|f| app.visible_columns.contains(f))
+                            .cloned()
+                            .collect();
+                        if let Some(&field) = visible_fields.get(app.setup_menu_index) {
+                            if field != ProcessSortField::Command {
+                                app.visible_columns.remove(&field);
+                                if app.setup_menu_index > 0 {
+                                    app.setup_menu_index -= 1;
+                                }
+                            }
+                        }
+                    }
+                    _ => {} // Meters: future
                 }
             }
         }
         KeyCode::Char('a') => {
-            // Toggle all columns
-            if app.visible_columns.len() == all_fields.len() {
-                // If all visible, hide all except Command
-                app.visible_columns.clear();
-                app.visible_columns.insert(ProcessSortField::Command);
-            } else {
-                // Show all
-                for field in all_fields {
-                    app.visible_columns.insert(*field);
+            // Toggle all columns (Columns category only)
+            if app.setup_category == 3 && app.setup_panel == 1 {
+                if app.visible_columns.len() == all_fields.len() {
+                    app.visible_columns.clear();
+                    app.visible_columns.insert(ProcessSortField::Command);
+                } else {
+                    for field in all_fields {
+                        app.visible_columns.insert(*field);
+                    }
                 }
+                app.setup_menu_index = 0;
+            }
+        }
+        KeyCode::Char('+') | KeyCode::Char('=') => {
+            if app.setup_category == 1 {
+                app.update_interval_ms = (app.update_interval_ms + 100).min(10000);
+            }
+        }
+        KeyCode::Char('-') => {
+            if app.setup_category == 1 {
+                app.update_interval_ms = app.update_interval_ms.saturating_sub(100).max(200);
             }
         }
         _ => {}

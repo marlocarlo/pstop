@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::color_scheme::{ColorScheme, ColorSchemeId};
 use crate::system::cpu::CpuInfo;
 use crate::system::memory::MemoryInfo;
+use crate::system::network::NetworkInfo;
 use crate::system::process::{ProcessInfo, ProcessSortField};
 
 /// Which tab is active (htop Tab key switches between these)
@@ -9,6 +11,7 @@ use crate::system::process::{ProcessInfo, ProcessSortField};
 pub enum ProcessTab {
     Main,  // Standard process view
     Io,    // I/O-focused view
+    Net,   // Network-focused view (pstop extension)
 }
 
 /// Which view/mode the app is currently in
@@ -37,6 +40,7 @@ pub struct App {
     // System data
     pub cpu_info: CpuInfo,
     pub memory_info: MemoryInfo,
+    pub network_info: NetworkInfo,
     pub processes: Vec<ProcessInfo>,
     pub filtered_processes: Vec<ProcessInfo>,
 
@@ -102,6 +106,28 @@ pub struct App {
     // Column visibility (F2 Setup menu)
     pub visible_columns: std::collections::HashSet<ProcessSortField>,
     pub setup_menu_index: usize,
+    pub setup_category: usize,      // 0=Meters, 1=Display, 2=Colors, 3=Columns
+    pub setup_panel: usize,         // 0=categories, 1=options/columns
+    pub setup_meter_col: usize,     // 0=left, 1=right (Meters category)
+
+    // Display options (F2 Setup → Display options) — full htop parity
+    pub show_tree_by_default: bool,
+    pub highlight_base_name: bool,
+    pub shadow_other_users: bool,
+    pub show_merged_command: bool,
+    pub highlight_megabytes: bool,      // Highlight large memory values
+    pub highlight_threads: bool,        // Display threads in different color
+    pub header_margin: bool,            // Leave margin around header
+    pub detailed_cpu_time: bool,        // Detailed CPU time breakdown
+    pub cpu_count_from_zero: bool,      // Number CPUs from 0
+    pub update_process_names: bool,     // Refresh process names each cycle
+    pub show_thread_names: bool,        // Show custom thread names
+    pub enable_mouse: bool,             // Mouse support on/off
+    pub update_interval_ms: u64,        // Configurable refresh rate
+
+    // Color scheme
+    pub color_scheme_id: ColorSchemeId,
+    pub color_scheme: ColorScheme,
 
     // Tick counter for refresh
     pub tick: u64,
@@ -126,6 +152,7 @@ impl App {
 
             cpu_info: CpuInfo::default(),
             memory_info: MemoryInfo::default(),
+            network_info: NetworkInfo::default(),
             processes: Vec::new(),
             filtered_processes: Vec::new(),
 
@@ -183,6 +210,25 @@ impl App {
                 ProcessSortField::Command,
             ].iter().cloned().collect(),
             setup_menu_index: 0,
+            setup_category: 0,
+            setup_panel: 0,
+            setup_meter_col: 0,
+            show_tree_by_default: false,
+            highlight_base_name: true,
+            shadow_other_users: false,
+            show_merged_command: false,
+            highlight_megabytes: true,
+            highlight_threads: true,
+            header_margin: true,
+            detailed_cpu_time: false,
+            cpu_count_from_zero: false,
+            update_process_names: false,
+            show_thread_names: false,
+            enable_mouse: true,
+            update_interval_ms: 1500,
+
+            color_scheme_id: ColorSchemeId::Default,
+            color_scheme: ColorScheme::from_id(ColorSchemeId::Default),
 
             tick: 0,
         }

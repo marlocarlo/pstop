@@ -17,6 +17,8 @@ pub struct Collector {
     /// Cache: Win32 process data (priority, threads) - updated every 3 ticks
     win_data_cache: HashMap<u32, winapi::WinProcessData>,
     win_data_cache_ticks: u64,
+    /// Previous I/O counters for rate calculation: PID -> (read_bytes, write_bytes, timestamp)
+    prev_io_counters: HashMap<u32, (u64, u64, std::time::Instant)>,
     /// Exponential moving averages for load approximation
     load_samples_1: f64,
     load_samples_5: f64,
@@ -42,6 +44,7 @@ impl Collector {
             user_cache: HashMap::new(),
             win_data_cache: HashMap::new(),
             win_data_cache_ticks: 0,
+            prev_io_counters: HashMap::new(),
             load_samples_1: 0.0,
             load_samples_5: 0.0,
             load_samples_15: 0.0,
@@ -198,12 +201,33 @@ impl Collector {
 
                 let user_name = self.resolve_user_by_uid(uid_str.as_deref());
 
-                // Get Win32 data (priority, nice, thread count)
+                // Get Win32 data (priority, nice, thread count, I/O counters)
                 let wd = win_data.get(&pid);
                 let priority = wd.map(|d| d.priority).unwrap_or(8);
                 let nice = wd.map(|d| d.nice).unwrap_or(0);
                 let threads = wd.map(|d| d.thread_count).unwrap_or(1);
                 total_threads += threads as usize;
+
+                // Calculate I/O rates based on difference from previous tick
+                let io_read_bytes = wd.map(|d| d.io_read_bytes).unwrap_or(0);
+                let io_write_bytes = wd.map(|d| d.io_write_bytes).unwrap_or(0);
+                let now = std::time::Instant::now();
+                
+                let (io_read_rate, io_write_rate) = if let Some((prev_read, prev_write, prev_time)) = self.prev_io_counters.get(&pid) {
+                    let elapsed = now.duration_since(*prev_time).as_secs_f64();
+                    if elapsed > 0.0 {
+                        let read_rate = (io_read_bytes.saturating_sub(*prev_read)) as f64 / elapsed;
+                        let write_rate = (io_write_bytes.saturating_sub(*prev_write)) as f64 / elapsed;
+                        (read_rate, write_rate)
+                    } else {
+                        (0.0, 0.0)
+                    }
+                } else {
+                    (0.0, 0.0)
+                };
+
+                // Update prev counters for next tick
+                self.prev_io_counters.insert(pid, (io_read_bytes, io_write_bytes, now));
 
                 ProcessInfo {
                     pid,
@@ -221,6 +245,8 @@ impl Collector {
                     mem_usage: mem_pct,
                     run_time,
                     threads,
+                    io_read_rate,
+                    io_write_rate,
                     depth: 0,
                     is_last_child: false,
                     tagged: false,

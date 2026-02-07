@@ -46,6 +46,7 @@ pub fn draw_help(f: &mut Frame) {
         Line::from("  c           Tag process + all children"),
         Line::from("  U           Untag all processes"),
         Line::from("  H           Toggle show threads"),
+        Line::from("  K           Hide kernel/system threads"),
         Line::from("  Z/z         Pause/freeze display"),
         Line::from("  Ctrl+L      Force refresh (unpause)"),
         Line::from("  p           Toggle full command path"),

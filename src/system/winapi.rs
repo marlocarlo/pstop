@@ -12,10 +12,11 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     TH32CS_SNAPTHREAD, THREADENTRY32,
 };
 use windows::Win32::System::Threading::{
-    GetPriorityClass, OpenProcess, SetPriorityClass,
+    GetPriorityClass, OpenProcess, SetPriorityClass, GetProcessIoCounters,
     ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS,
     HIGH_PRIORITY_CLASS, IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
     REALTIME_PRIORITY_CLASS, PROCESS_QUERY_INFORMATION, PROCESS_SET_INFORMATION,
+    IO_COUNTERS,
 };
 
 /// Per-process data collected via Windows API
@@ -24,6 +25,9 @@ pub struct WinProcessData {
     pub priority: i32,   // Base priority level (PRI column)
     pub nice: i32,       // Nice-equivalent mapping (NI column)
     pub thread_count: u32,
+    // I/O counters (cumulative bytes)
+    pub io_read_bytes: u64,
+    pub io_write_bytes: u64,
 }
 
 /// Batch-collect Windows-specific process data for all running processes.
@@ -36,10 +40,13 @@ pub fn collect_process_data(pids: &[u32]) -> HashMap<u32, WinProcessData> {
     for &pid in pids {
         let tc = thread_counts.get(&pid).copied().unwrap_or(1);
         let (pri, ni) = get_priority(pid);
+        let (io_read, io_write) = get_io_counters(pid);
         result.insert(pid, WinProcessData {
             priority: pri,
             nice: ni,
             thread_count: tc,
+            io_read_bytes: io_read,
+            io_write_bytes: io_write,
         });
     }
 
@@ -119,6 +126,34 @@ fn map_priority_class(pclass: u32) -> (i32, i32) {
         x if x == HIGH_PRIORITY_CLASS.0         => (13, -10),
         x if x == REALTIME_PRIORITY_CLASS.0     => (24, -20),
         _ => (8, 0), // Unknown → NORMAL
+    }
+}
+
+/// Get I/O counters for a process (cumulative bytes read/written)
+/// Returns (read_bytes, write_bytes)
+fn get_io_counters(pid: u32) -> (u64, u64) {
+    if pid == 0 || pid == 4 {
+        // System Idle Process / System — can't open
+        return (0, 0);
+    }
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_INFORMATION, false, pid);
+        let handle = match handle {
+            Ok(h) => h,
+            Err(_) => return (0, 0),
+        };
+
+        let mut counters: IO_COUNTERS = mem::zeroed();
+        let result = GetProcessIoCounters(handle, &mut counters as *mut _);
+        
+        let _ = CloseHandle(handle);
+
+        if result.is_ok() {
+            (counters.ReadTransferCount, counters.WriteTransferCount)
+        } else {
+            (0, 0)
+        }
     }
 }
 

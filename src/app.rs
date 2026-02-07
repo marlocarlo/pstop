@@ -63,6 +63,9 @@ pub struct App {
     // Show threads
     pub show_threads: bool,
 
+    // Hide kernel/system threads (htop 'K')
+    pub hide_kernel_threads: bool,
+
     // Show full paths to commands (htop 'p' toggle)
     pub show_full_path: bool,
 
@@ -127,6 +130,7 @@ impl App {
             tree_view: false,
             collapsed_pids: HashSet::new(),
             show_threads: false,
+            hide_kernel_threads: false,
             show_full_path: false,
 
             uptime_seconds: 0,
@@ -164,6 +168,13 @@ impl App {
                 ProcessSortField::Time => a.run_time.cmp(&b.run_time),
                 ProcessSortField::Command => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
                 ProcessSortField::Status => a.status.cmp(&b.status),
+                ProcessSortField::IoReadRate => a.io_read_rate.partial_cmp(&b.io_read_rate).unwrap_or(std::cmp::Ordering::Equal),
+                ProcessSortField::IoWriteRate => a.io_write_rate.partial_cmp(&b.io_write_rate).unwrap_or(std::cmp::Ordering::Equal),
+                ProcessSortField::IoRate => {
+                    let a_total = a.io_read_rate + a.io_write_rate;
+                    let b_total = b.io_read_rate + b.io_write_rate;
+                    a_total.partial_cmp(&b_total).unwrap_or(std::cmp::Ordering::Equal)
+                }
             };
             if ascending { ord } else { ord.reverse() }
         });
@@ -177,6 +188,15 @@ impl App {
         if let Some(ref user) = self.user_filter {
             let u = user.to_lowercase();
             self.filtered_processes.retain(|p| p.user.to_lowercase() == u);
+        }
+
+        // Hide kernel threads (K toggle) - Windows: hide SYSTEM processes
+        if self.hide_kernel_threads {
+            self.filtered_processes.retain(|p| {
+                // Keep if user is not SYSTEM or NT AUTHORITY\SYSTEM
+                let user_lower = p.user.to_lowercase();
+                !user_lower.contains("system") && !user_lower.contains("nt authority")
+            });
         }
 
         // F4 persistent filter (filter_query)

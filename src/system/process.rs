@@ -14,6 +14,9 @@ pub enum ProcessSortField {
     Mem,
     Time,
     Command,
+    IoReadRate,
+    IoWriteRate,
+    IoRate,
 }
 
 impl ProcessSortField {
@@ -32,6 +35,9 @@ impl ProcessSortField {
             Self::Mem => "MEM%",
             Self::Time => "TIME+",
             Self::Command => "Command",
+            Self::IoReadRate => "DISK READ",
+            Self::IoWriteRate => "DISK WRITE",
+            Self::IoRate => "DISK R/W",
         }
     }
 
@@ -50,6 +56,9 @@ impl ProcessSortField {
             Self::Mem => "PERCENT_MEM",
             Self::Time => "TIME+",
             Self::Command => "Command",
+            Self::IoReadRate => "IO_READ_RATE",
+            Self::IoWriteRate => "IO_WRITE_RATE",
+            Self::IoRate => "IO_RATE",
         }
     }
 
@@ -67,6 +76,9 @@ impl ProcessSortField {
             Self::Cpu,
             Self::Mem,
             Self::Time,
+            Self::IoReadRate,
+            Self::IoWriteRate,
+            Self::IoRate,
             Self::Command,
         ]
     }
@@ -125,6 +137,9 @@ pub struct ProcessInfo {
     pub mem_usage: f32,      // percentage
     pub run_time: u64,       // seconds
     pub threads: u32,
+    // I/O statistics
+    pub io_read_rate: f64,   // bytes/second
+    pub io_write_rate: f64,  // bytes/second
     // For tree view
     pub depth: usize,
     pub is_last_child: bool,

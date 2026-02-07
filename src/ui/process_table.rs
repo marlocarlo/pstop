@@ -10,19 +10,22 @@ use crate::system::process::ProcessSortField;
 
 /// htop's exact default column headers and widths:
 /// PID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ Command
+/// Note: I/O columns are shown when available (optional in htop via F2 setup)
 const HEADERS: &[(&str, u16, ProcessSortField)] = &[
-    ("PID",     7,  ProcessSortField::Pid),
-    ("USER",    9,  ProcessSortField::User),
-    ("PRI",     4,  ProcessSortField::Priority),
-    ("NI",      4,  ProcessSortField::Nice),
-    ("VIRT",    7,  ProcessSortField::VirtMem),
-    ("RES",     7,  ProcessSortField::ResMem),
-    ("SHR",     7,  ProcessSortField::SharedMem),
-    ("S",       2,  ProcessSortField::Status),
-    ("CPU%",    6,  ProcessSortField::Cpu),
-    ("MEM%",    6,  ProcessSortField::Mem),
-    ("TIME+",   10, ProcessSortField::Time),
-    ("Command", 0,  ProcessSortField::Command), // 0 = takes remaining space
+    ("PID",        7,  ProcessSortField::Pid),
+    ("USER",       9,  ProcessSortField::User),
+    ("PRI",        4,  ProcessSortField::Priority),
+    ("NI",         4,  ProcessSortField::Nice),
+    ("VIRT",       7,  ProcessSortField::VirtMem),
+    ("RES",        7,  ProcessSortField::ResMem),
+    ("SHR",        7,  ProcessSortField::SharedMem),
+    ("S",          2,  ProcessSortField::Status),
+    ("CPU%",       6,  ProcessSortField::Cpu),
+    ("MEM%",       6,  ProcessSortField::Mem),
+    ("TIME+",     10,  ProcessSortField::Time),
+    ("IO_R",      10,  ProcessSortField::IoReadRate),   // htop: DISK READ
+    ("IO_W",      10,  ProcessSortField::IoWriteRate),  // htop: DISK WRITE
+    ("Command",    0,  ProcessSortField::Command), // 0 = takes remaining space
 ];
 
 /// Draw the process table
@@ -257,7 +260,7 @@ fn build_process_row(
     let base_style = Style::default().bg(bg);
 
     // Build spans matching htop's exact column order:
-    // PID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ Command
+    // PID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ IO_R IO_W Command
     let mut spans = vec![
         Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)),
         Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(Color::LightCyan)),
@@ -270,6 +273,8 @@ fn build_process_row(
         Span::styled(format!("{:>5.1} ", proc.cpu_usage), base_style.fg(cpu_fg)),
         Span::styled(format!("{:>5.1} ", proc.mem_usage), base_style.fg(mem_fg)),
         Span::styled(format!("{:>9} ", proc.format_time()), base_style.fg(Color::White)),
+        Span::styled(format!("{:>9} ", format_io_rate(proc.io_read_rate)), base_style.fg(Color::Yellow)),
+        Span::styled(format!("{:>9} ", format_io_rate(proc.io_write_rate)), base_style.fg(Color::Magenta)),
     ];
 
     // Command with basename highlighting (htop shows the process name in a different color)
@@ -300,5 +305,20 @@ fn truncate_str(s: &str, max: usize) -> String {
         s.chars().take(max).collect()
     } else {
         s.to_string()
+    }
+}
+
+/// Format I/O rate (bytes/second) in human-readable form (e.g., "1.5M/s", "23K/s")
+fn format_io_rate(rate: f64) -> String {
+    if rate == 0.0 {
+        "0".to_string()
+    } else if rate < 1024.0 {
+        format!("{}B/s", rate as u64)
+    } else if rate < 1024.0 * 1024.0 {
+        format!("{:.1}K/s", rate / 1024.0)
+    } else if rate < 1024.0 * 1024.0 * 1024.0 {
+        format!("{:.1}M/s", rate / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1}G/s", rate / (1024.0 * 1024.0 * 1024.0))
     }
 }

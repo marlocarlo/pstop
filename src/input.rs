@@ -121,6 +121,9 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         // ── Toggle show threads (htop 'H') ──
         KeyCode::Char('H') => app.show_threads = !app.show_threads,
 
+        // ── Toggle hide kernel/system threads (htop 'K') ──
+        KeyCode::Char('K') => app.hide_kernel_threads = !app.hide_kernel_threads,
+
         // ── Pause/freeze updates (htop 'Z') ──
         KeyCode::Char('Z') | KeyCode::Char('z') => app.paused = !app.paused,
 

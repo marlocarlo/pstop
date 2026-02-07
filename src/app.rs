@@ -16,6 +16,7 @@ pub enum AppMode {
     UserFilter,
     Affinity,    // a: CPU affinity selector
     Environment, // e: show process details/environment
+    Setup,       // F2: setup menu (column/display configuration)
 }
 
 /// Main application state
@@ -89,6 +90,10 @@ pub struct App {
     // CPU affinity mode
     pub affinity_cpus: Vec<bool>, // CPU selection state (true = enabled)
 
+    // Column visibility (F2 Setup menu)
+    pub visible_columns: std::collections::HashSet<ProcessSortField>,
+    pub setup_menu_index: usize,
+
     // Tick counter for refresh
     pub tick: u64,
 }
@@ -151,6 +156,23 @@ impl App {
             kill_signal_index: 1, // Default to SIGKILL (force) on Windows
 
             affinity_cpus: Vec::new(),
+
+            // Default visible columns (htop default set)
+            visible_columns: [
+                ProcessSortField::Pid,
+                ProcessSortField::User,
+                ProcessSortField::Priority,
+                ProcessSortField::Nice,
+                ProcessSortField::VirtMem,
+                ProcessSortField::ResMem,
+                ProcessSortField::SharedMem,
+                ProcessSortField::Status,
+                ProcessSortField::Cpu,
+                ProcessSortField::Mem,
+                ProcessSortField::Time,
+                ProcessSortField::Command,
+            ].iter().cloned().collect(),
+            setup_menu_index: 0,
 
             tick: 0,
         }

@@ -1,6 +1,6 @@
 /// Sort field options for the process table — matches htop's default columns:
 /// PID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ Command
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProcessSortField {
     Pid,
     Ppid,

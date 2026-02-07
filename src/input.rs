@@ -16,6 +16,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent) {
         AppMode::UserFilter => handle_user_filter_mode(app, key),
         AppMode::Affinity  => handle_affinity_mode(app, key),
         AppMode::Environment => handle_environment_mode(app, key),
+        AppMode::Setup     => handle_setup_mode(app, key),
     }
 }
 
@@ -43,6 +44,12 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::F(1) | KeyCode::Char('?') => app.mode = AppMode::Help,
         KeyCode::Char('h') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.mode = AppMode::Help;
+        }
+
+        // ── F2 / Setup menu — configure columns and display ──
+        KeyCode::F(2) | KeyCode::Char('S') => {
+            app.setup_menu_index = 0;
+            app.mode = AppMode::Setup;
         }
 
         // ── F3 / Search — jump to match, no filtering ──
@@ -429,6 +436,54 @@ fn handle_environment_mode(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('e') | KeyCode::Char('q') | KeyCode::Enter => {
             app.mode = AppMode::Normal;
+        }
+        _ => {}
+    }
+}
+
+// ── Setup/Configuration mode (F2) ───────────────────────────────────────
+
+fn handle_setup_mode(app: &mut App, key: KeyEvent) {
+    let all_fields = ProcessSortField::all();
+    
+    match key.code {
+        KeyCode::Esc | KeyCode::F(2) | KeyCode::F(10) => {
+            app.mode = AppMode::Normal;
+        }
+        KeyCode::Up => {
+            if app.setup_menu_index > 0 {
+                app.setup_menu_index -= 1;
+            }
+        }
+        KeyCode::Down => {
+            if app.setup_menu_index + 1 < all_fields.len() {
+                app.setup_menu_index += 1;
+            }
+        }
+        KeyCode::Char(' ') | KeyCode::Enter => {
+            // Toggle column visibility
+            let field = all_fields[app.setup_menu_index];
+            // Don't allow hiding Command column (always needed)
+            if field != ProcessSortField::Command {
+                if app.visible_columns.contains(&field) {
+                    app.visible_columns.remove(&field);
+                } else {
+                    app.visible_columns.insert(field);
+                }
+            }
+        }
+        KeyCode::Char('a') => {
+            // Toggle all columns
+            if app.visible_columns.len() == all_fields.len() {
+                // If all visible, hide all except Command
+                app.visible_columns.clear();
+                app.visible_columns.insert(ProcessSortField::Command);
+            } else {
+                // Show all
+                for field in all_fields {
+                    app.visible_columns.insert(*field);
+                }
+            }
         }
         _ => {}
     }

@@ -46,11 +46,16 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
         header_area,
     );
 
-    // Build header spans with sort indicator
+    // Build header spans with sort indicator (only visible columns)
     let mut header_spans: Vec<Span> = Vec::new();
     for (name, width, sort_field) in HEADERS {
+        // Skip columns that are not visible (F2 setup menu)
+        if !app.visible_columns.contains(sort_field) {
+            continue;
+        }
+        
         let is_sorted = *sort_field == app.sort_field;
-        let w = if *width == 0 { (area.width as usize).saturating_sub(fixed_cols_width()) } else { *width as usize };
+        let w = if *width == 0 { (area.width as usize).saturating_sub(fixed_cols_width_visible(app)) } else { *width as usize };
 
         let display = if is_sorted {
             let arrow = if app.sort_ascending { "▲" } else { "▼" };
@@ -179,6 +184,14 @@ fn fixed_cols_width() -> usize {
     HEADERS.iter().map(|(_, w, _)| if *w > 0 { *w as usize + 1 } else { 0 }).sum()
 }
 
+/// Total width of visible fixed-width columns
+fn fixed_cols_width_visible(app: &App) -> usize {
+    HEADERS.iter()
+        .filter(|(_, _, field)| app.visible_columns.contains(field))
+        .map(|(_, w, _)| if *w > 0 { *w as usize + 1 } else { 0 })
+        .sum()
+}
+
 /// Build a single process row as a styled Line (matching htop's exact columns)
 fn build_process_row(
     proc: &crate::system::process::ProcessInfo,
@@ -246,7 +259,7 @@ fn build_process_row(
     };
 
     // Command column: htop highlights the basename in bold/color
-    let cmd_width = width.saturating_sub(fixed_cols_width());
+    let cmd_width = width.saturating_sub(fixed_cols_width_visible(app));
     // 'p' toggle: show full command path or just the process name
     let cmd_text = if app.show_full_path {
         proc.command.clone()
@@ -261,25 +274,57 @@ fn build_process_row(
 
     let base_style = Style::default().bg(bg);
 
-    // Build spans matching htop's exact column order:
+    // Build spans matching htop's exact column order (only visible columns)
     // PID PPID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ THR IO_R IO_W Command
-    let mut spans = vec![
-        Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)),
-        Span::styled(format!("{:>6} ", proc.ppid), base_style.fg(Color::Green)),
-        Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(Color::LightCyan)),
-        Span::styled(format!("{:>3} ", proc.priority), base_style.fg(Color::White)),
-        Span::styled(format!("{:>3} ", proc.nice), base_style.fg(Color::White)),
-        Span::styled(format!("{:>6} ", format_bytes(proc.virtual_mem)), base_style.fg(Color::Cyan)),
-        Span::styled(format!("{:>6} ", format_bytes(proc.resident_mem)), base_style.fg(Color::White).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("{:>6} ", format_bytes(proc.shared_mem)), base_style.fg(Color::White)),
-        Span::styled(format!("{} ", proc.status.symbol()), base_style.fg(status_fg)),
-        Span::styled(format!("{:>5.1} ", proc.cpu_usage), base_style.fg(cpu_fg)),
-        Span::styled(format!("{:>5.1} ", proc.mem_usage), base_style.fg(mem_fg)),
-        Span::styled(format!("{:>9} ", proc.format_time()), base_style.fg(Color::White)),
-        Span::styled(format!("{:>3} ", proc.threads), base_style.fg(Color::Cyan)),
-        Span::styled(format!("{:>9} ", format_io_rate(proc.io_read_rate)), base_style.fg(Color::Yellow)),
-        Span::styled(format!("{:>9} ", format_io_rate(proc.io_write_rate)), base_style.fg(Color::Magenta)),
-    ];
+    let mut spans = Vec::new();
+    
+    use crate::system::process::ProcessSortField;
+    
+    if app.visible_columns.contains(&ProcessSortField::Pid) {
+        spans.push(Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::Ppid) {
+        spans.push(Span::styled(format!("{:>6} ", proc.ppid), base_style.fg(Color::Green)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::User) {
+        spans.push(Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(Color::LightCyan)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::Priority) {
+        spans.push(Span::styled(format!("{:>3} ", proc.priority), base_style.fg(Color::White)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::Nice) {
+        spans.push(Span::styled(format!("{:>3} ", proc.nice), base_style.fg(Color::White)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::VirtMem) {
+        spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.virtual_mem)), base_style.fg(Color::Cyan)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::ResMem) {
+        spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.resident_mem)), base_style.fg(Color::White).add_modifier(Modifier::BOLD)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::SharedMem) {
+        spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.shared_mem)), base_style.fg(Color::White)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::Status) {
+        spans.push(Span::styled(format!("{} ", proc.status.symbol()), base_style.fg(status_fg)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::Cpu) {
+        spans.push(Span::styled(format!("{:>5.1} ", proc.cpu_usage), base_style.fg(cpu_fg)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::Mem) {
+        spans.push(Span::styled(format!("{:>5.1} ", proc.mem_usage), base_style.fg(mem_fg)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::Time) {
+        spans.push(Span::styled(format!("{:>9} ", proc.format_time()), base_style.fg(Color::White)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::Threads) {
+        spans.push(Span::styled(format!("{:>3} ", proc.threads), base_style.fg(Color::Cyan)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::IoReadRate) {
+        spans.push(Span::styled(format!("{:>9} ", format_io_rate(proc.io_read_rate)), base_style.fg(Color::Yellow)));
+    }
+    if app.visible_columns.contains(&ProcessSortField::IoWriteRate) {
+        spans.push(Span::styled(format!("{:>9} ", format_io_rate(proc.io_write_rate)), base_style.fg(Color::Magenta)));
+    }
 
     // Command with basename highlighting (htop shows the process name in a different color)
     if let Some(pos) = command_truncated.find(base_name.as_str()) {

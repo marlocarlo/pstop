@@ -7,6 +7,7 @@ pub mod kill_menu;
 pub mod user_menu;
 pub mod affinity_menu;
 pub mod environment_view;
+pub mod setup_menu;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -45,6 +46,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     // Overlay popups
     match app.mode {
         AppMode::Help => help::draw_help(f),
+        AppMode::Setup => setup_menu::draw_setup_menu(f, app),
         AppMode::SortSelect => sort_menu::draw_sort_menu(f, app),
         AppMode::Kill => kill_menu::draw_kill_menu(f, app),
         AppMode::UserFilter => user_menu::draw_user_menu(f, app),

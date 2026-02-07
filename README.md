@@ -1,27 +1,39 @@
 # pstop
 
-An **htop-like** interactive system monitor for **Windows PowerShell**, written entirely in **Rust**.
+An **htop-like** interactive system monitor for **Windows PowerShell**, written entirely in **Rust**. Designed to be a drop-in replacement for htop on Windows with full feature parity.
 
-## Display
+## Features
 
+### Display
 - **Per-core CPU bars** — two-column layout with multi-color bars (green=user, red=kernel)
 - **Memory bar** — green (used), blue (buffers), yellow (cache) — matches htop
 - **Swap bar** — color-coded by pressure
 - **Tasks line** — process count, thread count, running count
 - **Load average** — EMA-approximated (Windows doesn't have native load avg)
 - **Uptime** — formatted as `DD days, HH:MM:SS`
-- **12-column process table** — `PID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ Command`
+- **17-column process table** — `PID PPID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ THR IO_R IO_W Command`
 - **Column header** — cyan background, green highlight on sorted column with ▲/▼
 - **Tree view** — Unicode connectors (├─ └─ │) with expand/collapse per-node
 - **Search bar** (F3) — jump to match without filtering
 - **Filter bar** (F4) — persistent filter that hides non-matching processes
 - **F-key bar** — htop-style black-on-cyan key labels
 
+### Advanced Features
+- **I/O statistics** — Real-time I/O read/write rates per process (via GetProcessIoCounters)
+- **CPU affinity** — View and modify process CPU affinity masks ('a' key)
+- **Process details** — Comprehensive environment/details viewer ('e' key)
+- **Open files/handles** — List loaded modules and handles ('l' key - lsof equivalent)
+- **Column configuration** — F2 Setup menu to show/hide columns like htop
+- **Hide kernel threads** — 'K' key to filter out system/kernel processes
+- **PPID column** — Parent process ID tracking
+- **Thread count** — THR column showing thread count per process
+
 ## Keybindings (htop-compatible)
 
 | Key | Action |
 |-----|--------|
 | **F1** / **h** / **?** | Help |
+| **F2** / **S** | Setup - configure visible columns |
 | **F3** / **/** | Search (jump to match) |
 | **F4** / **\\** | Filter (hide non-matching) |
 | **F5** / **t** | Toggle tree view |
@@ -39,8 +51,12 @@ An **htop-like** interactive system monitor for **Windows PowerShell**, written 
 | **c** | Tag process + all children |
 | **U** | Untag all |
 | **u** | Filter by user |
+| **a** | Set CPU affinity |
+| **e** | Show process details/environment |
+| **l** | List open files/handles (lsof) |
 | **F** | Follow selected process |
 | **H** | Toggle thread display |
+| **K** | Hide kernel/system threads |
 | **p** | Toggle full command path |
 | **Z** / **z** | Pause / freeze display |
 | **Ctrl+L** | Force refresh |
@@ -52,9 +68,13 @@ An **htop-like** interactive system monitor for **Windows PowerShell**, written 
 
 - Real process **priority** and **nice** values via Win32 `GetPriorityClass`
 - Real per-process **thread counts** via `CreateToolhelp32Snapshot`
+- **I/O statistics** via `GetProcessIoCounters` — read/write bytes per second
+- **CPU affinity** via `GetProcessAffinityMask` and `SetProcessAffinityMask`
+- **Open handles** enumeration via `EnumProcessModulesEx` and `GetModuleFileNameExW`
 - Priority changes via `SetPriorityClass` (F7/F8)
 - Process kill via `taskkill /F`
 - User resolution from Windows SIDs
+- PPID (Parent PID) tracking via sysinfo
 
 ## Building
 
@@ -81,18 +101,22 @@ src/
 │   ├── mod.rs
 │   ├── cpu.rs             # CPU core & aggregate info structs
 │   ├── memory.rs          # Memory/swap info & byte formatting
-│   ├── process.rs         # ProcessInfo, ProcessStatus, ProcessSortField
-│   ├── collector.rs       # System data collection (sysinfo + Win32)
-│   └── winapi.rs          # Win32 API: priority, threads, SetPriorityClass
+│   ├── process.rs         # ProcessInfo, ProcessStatus, ProcessSortField (17 fields)
+│   ├── collector.rs       # System data collection (sysinfo + Win32 + I/O)
+│   └── winapi.rs          # Win32 API: priority, threads, I/O, affinity, handles
 └── ui/
     ├── mod.rs             # UI layout & draw dispatcher
     ├── header.rs          # CPU bars, memory bars, tasks/load/uptime
-    ├── process_table.rs   # Process list with 12-column headers
+    ├── process_table.rs   # Process list with 17-column headers
     ├── footer.rs          # F-key function bar
     ├── help.rs            # Help overlay popup
     ├── sort_menu.rs       # Sort-by selection overlay
     ├── kill_menu.rs       # Kill signal selection overlay
-    └── user_menu.rs       # User filter selection overlay
+    ├── user_menu.rs       # User filter selection overlay
+    ├── affinity_menu.rs   # CPU affinity selection overlay
+    ├── environment_view.rs # Process details/environment viewer
+    ├── setup_menu.rs      # F2 column configuration overlay
+    └── handles_view.rs    # Open files/handles viewer (lsof)
 ```
 
 ## Dependencies

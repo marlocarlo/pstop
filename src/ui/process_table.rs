@@ -24,6 +24,7 @@ const HEADERS: &[(&str, u16, ProcessSortField)] = &[
     ("CPU%",       6,  ProcessSortField::Cpu),
     ("MEM%",       6,  ProcessSortField::Mem),
     ("TIME+",     10,  ProcessSortField::Time),
+    ("THR",        4,  ProcessSortField::Threads),
     ("IO_R",      10,  ProcessSortField::IoReadRate),   // htop: DISK READ
     ("IO_W",      10,  ProcessSortField::IoWriteRate),  // htop: DISK WRITE
     ("Command",    0,  ProcessSortField::Command), // 0 = takes remaining space
@@ -261,7 +262,7 @@ fn build_process_row(
     let base_style = Style::default().bg(bg);
 
     // Build spans matching htop's exact column order:
-    // PID PPID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ IO_R IO_W Command
+    // PID PPID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ THR IO_R IO_W Command
     let mut spans = vec![
         Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)),
         Span::styled(format!("{:>6} ", proc.ppid), base_style.fg(Color::Green)),
@@ -275,6 +276,7 @@ fn build_process_row(
         Span::styled(format!("{:>5.1} ", proc.cpu_usage), base_style.fg(cpu_fg)),
         Span::styled(format!("{:>5.1} ", proc.mem_usage), base_style.fg(mem_fg)),
         Span::styled(format!("{:>9} ", proc.format_time()), base_style.fg(Color::White)),
+        Span::styled(format!("{:>3} ", proc.threads), base_style.fg(Color::Cyan)),
         Span::styled(format!("{:>9} ", format_io_rate(proc.io_read_rate)), base_style.fg(Color::Yellow)),
         Span::styled(format!("{:>9} ", format_io_rate(proc.io_write_rate)), base_style.fg(Color::Magenta)),
     ];

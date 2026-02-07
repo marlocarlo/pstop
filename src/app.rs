@@ -15,6 +15,7 @@ pub enum AppMode {
     Kill,
     UserFilter,
     Affinity,    // a: CPU affinity selector
+    Environment, // e: show process details/environment
 }
 
 /// Main application state
@@ -173,6 +174,7 @@ impl App {
                 ProcessSortField::Cpu => a.cpu_usage.partial_cmp(&b.cpu_usage).unwrap_or(std::cmp::Ordering::Equal),
                 ProcessSortField::Mem => a.mem_usage.partial_cmp(&b.mem_usage).unwrap_or(std::cmp::Ordering::Equal),
                 ProcessSortField::Time => a.run_time.cmp(&b.run_time),
+                ProcessSortField::Threads => a.threads.cmp(&b.threads),
                 ProcessSortField::Command => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
                 ProcessSortField::Status => a.status.cmp(&b.status),
                 ProcessSortField::IoReadRate => a.io_read_rate.partial_cmp(&b.io_read_rate).unwrap_or(std::cmp::Ordering::Equal),

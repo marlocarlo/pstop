@@ -15,6 +15,7 @@ pub fn handle_input(app: &mut App, key: KeyEvent) {
         AppMode::Kill      => handle_kill_mode(app, key),
         AppMode::UserFilter => handle_user_filter_mode(app, key),
         AppMode::Affinity  => handle_affinity_mode(app, key),
+        AppMode::Environment => handle_environment_mode(app, key),
     }
 }
 
@@ -176,6 +177,13 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
                         .collect();
                     app.mode = AppMode::Affinity;
                 }
+            }
+        }
+
+        // ── Show process environment/details (htop 'e') ──
+        KeyCode::Char('e') => {
+            if app.selected_process().is_some() {
+                app.mode = AppMode::Environment;
             }
         }
 
@@ -410,6 +418,17 @@ fn handle_affinity_mode(app: &mut App, key: KeyEvent) {
             for cpu in &mut app.affinity_cpus {
                 *cpu = !all_on;
             }
+        }
+        _ => {}
+    }
+}
+
+// ── Environment/Details mode ────────────────────────────────────────────
+
+fn handle_environment_mode(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('e') | KeyCode::Char('q') | KeyCode::Enter => {
+            app.mode = AppMode::Normal;
         }
         _ => {}
     }

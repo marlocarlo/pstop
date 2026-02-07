@@ -260,5 +260,5 @@ cargo run
 ---
 
 <p align="center">
-  <strong>Stop opening Task Manager. Type <code>htop</code>.</strong>
+  <strong>Stop opening Task Manager. Type <code>pstop</code> or its aliases.</strong>
 </p>

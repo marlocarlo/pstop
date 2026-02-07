@@ -9,7 +9,7 @@ pub mod affinity_menu;
 pub mod environment_view;
 pub mod setup_menu;
 pub mod handles_view;
-pub mod io_priority_menu;
+pub mod tab_bar;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -36,14 +36,16 @@ pub fn draw(f: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(h_height),   // header (CPU + mem + info)
+            Constraint::Length(1),          // tab bar (Main | I/O)
             Constraint::Min(5),             // process table
             Constraint::Length(1),          // footer (F-key bar)
         ])
         .split(size);
 
     header::draw_header(f, app, chunks[0]);
-    process_table::draw_process_table(f, app, chunks[1]);
-    footer::draw_footer(f, app, chunks[2]);
+    tab_bar::draw_tab_bar(f, app, chunks[1]);
+    process_table::draw_process_table(f, app, chunks[2]);
+    footer::draw_footer(f, app, chunks[3]);
 
     // Overlay popups
     match app.mode {
@@ -55,7 +57,6 @@ pub fn draw(f: &mut Frame, app: &App) {
         AppMode::Affinity => affinity_menu::draw_affinity_menu(f, app),
         AppMode::Environment => environment_view::draw_environment_view(f, app),
         AppMode::Handles => handles_view::draw_handles_view(f, app),
-        AppMode::IoPriority => io_priority_menu::draw_io_priority_menu(f, app),
         _ => {}
     }
 }

@@ -11,7 +11,7 @@ An **htop-like** interactive system monitor for **Windows PowerShell**, written 
 - **Tasks line** — process count, thread count, running count
 - **Load average** — EMA-approximated (Windows doesn't have native load avg)
 - **Uptime** — formatted as `DD days, HH:MM:SS`
-- **18-column process table** — `PID PPID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ THR IO_R IO_W IO_RATE Command`
+- **17-column process table** — `PID PPID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ THR IO_R IO_W Command`
 - **Column header** — cyan background, green highlight on sorted column with ▲/▼
 - **Tree view** — Unicode connectors (├─ └─ │) with expand/collapse per-node
 - **Search bar** (F3) — jump to match without filtering
@@ -20,7 +20,6 @@ An **htop-like** interactive system monitor for **Windows PowerShell**, written 
 
 ### Advanced Features
 - **I/O statistics** — Real-time I/O read/write rates per process (via GetProcessIoCounters)
-- **I/O priority** — Set process I/O priority to background mode ('i' key)
 - **CPU affinity** — View and modify process CPU affinity masks ('a' key)
 - **Process details** — Comprehensive environment/details viewer ('e' key)
 - **Open files/handles** — List loaded modules and handles ('l' key - lsof equivalent)
@@ -54,7 +53,6 @@ An **htop-like** interactive system monitor for **Windows PowerShell**, written 
 | **u** | Filter by user |
 | **a** | Set CPU affinity |
 | **e** | Show process details/environment |
-| **i** | Set I/O priority (background mode) |
 | **l** | List open files/handles (lsof) |
 | **F** | Follow selected process |
 | **H** | Toggle thread display |
@@ -71,7 +69,6 @@ An **htop-like** interactive system monitor for **Windows PowerShell**, written 
 - Real process **priority** and **nice** values via Win32 `GetPriorityClass`
 - Real per-process **thread counts** via `CreateToolhelp32Snapshot`
 - **I/O statistics** via `GetProcessIoCounters` — read/write bytes per second
-- **I/O priority** via `SetPriorityClass` with PROCESS_MODE_BACKGROUND_BEGIN/END modes
 - **CPU affinity** via `GetProcessAffinityMask` and `SetProcessAffinityMask`
 - **Open handles** enumeration via `EnumProcessModulesEx` and `GetModuleFileNameExW`
 - Priority changes via `SetPriorityClass` (F7/F8)

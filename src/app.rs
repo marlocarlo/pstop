@@ -4,6 +4,13 @@ use crate::system::cpu::CpuInfo;
 use crate::system::memory::MemoryInfo;
 use crate::system::process::{ProcessInfo, ProcessSortField};
 
+/// Which tab is active (htop Tab key switches between these)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessTab {
+    Main,  // Standard process view
+    Io,    // I/O-focused view
+}
+
 /// Which view/mode the app is currently in
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
@@ -18,12 +25,12 @@ pub enum AppMode {
     Environment, // e: show process details/environment
     Setup,       // F2: setup menu (column/display configuration)
     Handles,     // l: list open files/handles (lsof equivalent)
-    IoPriority,  // i: I/O priority selector
 }
 
 /// Main application state
 pub struct App {
     pub mode: AppMode,
+    pub active_tab: ProcessTab, // Tab key switches between Main and I/O
     pub should_quit: bool,
     pub paused: bool,       // Z key: freeze/pause updates
 
@@ -92,9 +99,6 @@ pub struct App {
     // CPU affinity mode
     pub affinity_cpus: Vec<bool>, // CPU selection state (true = enabled)
 
-    // I/O priority menu
-    pub io_priority_index: usize,
-
     // Column visibility (F2 Setup menu)
     pub visible_columns: std::collections::HashSet<ProcessSortField>,
     pub setup_menu_index: usize,
@@ -116,6 +120,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             mode: AppMode::Normal,
+            active_tab: ProcessTab::Main,
             should_quit: false,
             paused: false,
 
@@ -161,8 +166,6 @@ impl App {
             kill_signal_index: 1, // Default to SIGKILL (force) on Windows
 
             affinity_cpus: Vec::new(),
-
-            io_priority_index: 0,
 
             // Default visible columns (htop default set)
             visible_columns: [

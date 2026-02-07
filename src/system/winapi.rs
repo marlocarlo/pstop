@@ -21,7 +21,6 @@ use windows::Win32::System::Threading::{
     ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS,
     HIGH_PRIORITY_CLASS, IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
     REALTIME_PRIORITY_CLASS, PROCESS_QUERY_INFORMATION, PROCESS_SET_INFORMATION,
-    PROCESS_MODE_BACKGROUND_BEGIN, PROCESS_MODE_BACKGROUND_END,
     IO_COUNTERS,
 };
 
@@ -354,45 +353,4 @@ pub fn get_process_handles(pid: u32) -> Vec<HandleInfo> {
     }
 
     handles
-}
-
-/// Get I/O priority for a process (checks if in background mode)
-/// Returns (is_background, success)
-pub fn get_io_priority(pid: u32) -> (bool, bool) {
-    unsafe {
-        let handle = match OpenProcess(PROCESS_QUERY_INFORMATION, false, pid) {
-            Ok(h) => h,
-            Err(_) => return (false, false),
-        };
-
-        // Windows doesn't have a direct "get I/O priority" API
-        // We'll use priority class as a proxy - IDLE_PRIORITY_CLASS indicates low I/O
-        let priority = GetPriorityClass(handle);
-        let is_background = priority == IDLE_PRIORITY_CLASS.0;
-
-        let _ = CloseHandle(handle);
-        (is_background, priority != 0)
-    }
-}
-
-/// Set I/O priority for a process (background mode = low I/O priority)
-/// Returns success
-pub fn set_io_priority_background(pid: u32, background: bool) -> bool {
-    unsafe {
-        let handle = match OpenProcess(PROCESS_SET_INFORMATION, false, pid) {
-            Ok(h) => h,
-            Err(_) => return false,
-        };
-
-        let result = if background {
-            // Enter background mode - reduces I/O and CPU priority
-            SetPriorityClass(handle, PROCESS_MODE_BACKGROUND_BEGIN)
-        } else {
-            // Exit background mode - restore normal priority
-            SetPriorityClass(handle, PROCESS_MODE_BACKGROUND_END)
-        };
-
-        let _ = CloseHandle(handle);
-        result.is_ok()
-    }
 }

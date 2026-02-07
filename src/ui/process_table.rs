@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::app::{App, AppMode};
+use crate::app::{App, AppMode, ProcessTab};
 use crate::system::memory::format_bytes;
 use crate::system::process::ProcessSortField;
 
@@ -27,8 +27,21 @@ const HEADERS: &[(&str, u16, ProcessSortField)] = &[
     ("THR",        4,  ProcessSortField::Threads),
     ("IO_R",      10,  ProcessSortField::IoReadRate),   // htop: DISK READ
     ("IO_W",      10,  ProcessSortField::IoWriteRate),  // htop: DISK WRITE
-    ("IO_RATE",   10,  ProcessSortField::IoRate),       // htop: DISK R/W (combined)
     ("Command",    0,  ProcessSortField::Command), // 0 = takes remaining space
+];
+
+/// htop I/O tab column headers
+/// PID USER IO DISK R/W DISK READ DISK WRITE SWPD% IOD% Command
+const IO_HEADERS: &[(&str, u16, ProcessSortField)] = &[
+    ("PID",         7,  ProcessSortField::Pid),
+    ("USER",        9,  ProcessSortField::User),
+    ("IO",          4,  ProcessSortField::Priority),    // I/O priority (maps from process priority)
+    ("DISK R/Mv",  10,  ProcessSortField::IoRate),      // Combined read+write
+    ("DISK READ",  10,  ProcessSortField::IoReadRate),
+    ("DISK WRITE", 11,  ProcessSortField::IoWriteRate),
+    ("SWPD%",       6,  ProcessSortField::Mem),         // Swap percentage approximation
+    ("IOD%",        6,  ProcessSortField::Cpu),         // I/O delay (approximated)
+    ("Command",     0,  ProcessSortField::Command),
 ];
 
 /// Draw the process table
@@ -36,6 +49,12 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
     if area.height < 2 {
         return;
     }
+
+    // Select headers based on active tab
+    let headers = match app.active_tab {
+        ProcessTab::Main => HEADERS,
+        ProcessTab::Io => IO_HEADERS,
+    };
 
     // --- Column header row (full-width colored background like htop) ---
     let header_area = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
@@ -47,16 +66,20 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
         header_area,
     );
 
-    // Build header spans with sort indicator (only visible columns)
+    // Build header spans with sort indicator
     let mut header_spans: Vec<Span> = Vec::new();
-    for (name, width, sort_field) in HEADERS {
-        // Skip columns that are not visible (F2 setup menu)
-        if !app.visible_columns.contains(sort_field) {
+    for (name, width, sort_field) in headers {
+        // On Main tab, skip columns that are not visible (F2 setup menu)
+        if app.active_tab == ProcessTab::Main && !app.visible_columns.contains(sort_field) {
             continue;
         }
         
         let is_sorted = *sort_field == app.sort_field;
-        let w = if *width == 0 { (area.width as usize).saturating_sub(fixed_cols_width_visible(app)) } else { *width as usize };
+        let fixed_w = match app.active_tab {
+            ProcessTab::Main => fixed_cols_width_visible(app),
+            ProcessTab::Io => io_fixed_cols_width(),
+        };
+        let w = if *width == 0 { (area.width as usize).saturating_sub(fixed_w) } else { *width as usize };
 
         let display = if is_sorted {
             let arrow = if app.sort_ascending { "▲" } else { "▼" };
@@ -134,7 +157,10 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
             height: 1,
         };
 
-        let row_line = build_process_row(proc, row_area.width as usize, app, is_selected, is_tagged);
+        let row_line = match app.active_tab {
+            ProcessTab::Main => build_process_row(proc, row_area.width as usize, app, is_selected, is_tagged),
+            ProcessTab::Io => build_io_row(proc, row_area.width as usize, app, is_selected, is_tagged),
+        };
         f.render_widget(Paragraph::new(row_line), row_area);
     }
 
@@ -191,6 +217,11 @@ fn fixed_cols_width_visible(app: &App) -> usize {
         .filter(|(_, _, field)| app.visible_columns.contains(field))
         .map(|(_, w, _)| if *w > 0 { *w as usize + 1 } else { 0 })
         .sum()
+}
+
+/// Total width of I/O tab fixed-width columns
+fn io_fixed_cols_width() -> usize {
+    IO_HEADERS.iter().map(|(_, w, _)| if *w > 0 { *w as usize + 1 } else { 0 }).sum()
 }
 
 /// Build a single process row as a styled Line (matching htop's exact columns)
@@ -326,10 +357,6 @@ fn build_process_row(
     if app.visible_columns.contains(&ProcessSortField::IoWriteRate) {
         spans.push(Span::styled(format!("{:>9} ", format_io_rate(proc.io_write_rate)), base_style.fg(Color::Magenta)));
     }
-    if app.visible_columns.contains(&ProcessSortField::IoRate) {
-        let total_io = proc.io_read_rate + proc.io_write_rate;
-        spans.push(Span::styled(format!("{:>9} ", format_io_rate(total_io)), base_style.fg(Color::Cyan)));
-    }
 
     // Command with basename highlighting (htop shows the process name in a different color)
     if let Some(pos) = command_truncated.find(base_name.as_str()) {
@@ -375,4 +402,150 @@ fn format_io_rate(rate: f64) -> String {
     } else {
         format!("{:.1}G/s", rate / (1024.0 * 1024.0 * 1024.0))
     }
+}
+
+/// Format I/O rate for the I/O tab with B/s suffix matching htop
+fn format_io_rate_io_tab(rate: f64) -> String {
+    if rate == 0.0 {
+        "0.00 B/s".to_string()
+    } else if rate < 1024.0 {
+        format!("{:.2} B/s", rate)
+    } else if rate < 1024.0 * 1024.0 {
+        format!("{:.2} K/s", rate / 1024.0)
+    } else if rate < 1024.0 * 1024.0 * 1024.0 {
+        format!("{:.2} M/s", rate / (1024.0 * 1024.0))
+    } else {
+        format!("{:.2} G/s", rate / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+/// Map process priority to I/O priority label (htop-style)
+/// htop shows "B0"-"B7" for Best Effort class, "R0"-"R7" for Realtime, "id" for Idle
+/// We map Windows priority classes:
+///   IDLE → id, BELOW_NORMAL → B6, NORMAL → B4, ABOVE_NORMAL → B2, HIGH → B0, REALTIME → R4
+fn io_priority_label(priority: i32) -> &'static str {
+    match priority {
+        4  => "id",   // IDLE_PRIORITY_CLASS
+        6  => "B6",   // BELOW_NORMAL
+        8  => "B4",   // NORMAL (default)
+        10 => "B2",   // ABOVE_NORMAL
+        13 => "B0",   // HIGH
+        24 => "R4",   // REALTIME
+        _  => "B4",   // Default to Normal
+    }
+}
+
+/// Build a row for the I/O tab view (htop I/O tab columns)
+/// PID USER IO DISK_R/Mv DISK_READ DISK_WRITE SWPD% IOD% Command
+fn build_io_row(
+    proc: &crate::system::process::ProcessInfo,
+    width: usize,
+    app: &App,
+    selected: bool,
+    tagged: bool,
+) -> Line<'static> {
+    let bg = if selected {
+        Color::Indexed(236)
+    } else {
+        Color::Reset
+    };
+
+    let pid_fg = if tagged { Color::Yellow } else { Color::Green };
+    let base_style = Style::default().bg(bg);
+
+    // I/O rate colors
+    let read_fg = if proc.io_read_rate > 1024.0 * 1024.0 {
+        Color::Red
+    } else if proc.io_read_rate > 1024.0 {
+        Color::Yellow
+    } else {
+        Color::White
+    };
+
+    let write_fg = if proc.io_write_rate > 1024.0 * 1024.0 {
+        Color::Red
+    } else if proc.io_write_rate > 1024.0 {
+        Color::Magenta
+    } else {
+        Color::White
+    };
+
+    let combined_rate = proc.io_read_rate + proc.io_write_rate;
+    let combined_fg = if combined_rate > 1024.0 * 1024.0 {
+        Color::Red
+    } else if combined_rate > 1024.0 {
+        Color::Cyan
+    } else {
+        Color::White
+    };
+
+    // SWPD%: approximated as 0 on Windows (swap per-process not easily available)
+    // We show N/A for most processes, 0.0 otherwise
+    let swpd_str = "N/A";
+    
+    // IOD%: I/O delay percentage (not available on Windows, show N/A)
+    let iod_str = "N/A";
+
+    // I/O priority label
+    let io_prio = io_priority_label(proc.priority);
+
+    // Command column width
+    let cmd_width = width.saturating_sub(io_fixed_cols_width());
+    let cmd_text = if app.show_full_path {
+        proc.command.clone()
+    } else {
+        proc.name.clone()
+    };
+
+    // Tree prefix
+    let tree_prefix = if app.tree_view && proc.depth > 0 {
+        let mut prefix = String::new();
+        for _ in 0..proc.depth.saturating_sub(1) {
+            prefix.push_str("│ ");
+        }
+        if proc.is_last_child {
+            prefix.push_str("└─");
+        } else {
+            prefix.push_str("├─");
+        }
+        prefix
+    } else {
+        String::new()
+    };
+
+    let command_display = format!("{}{}", tree_prefix, cmd_text);
+    let command_truncated = truncate_str(&command_display, cmd_width);
+    let base_name = &proc.name;
+
+    let mut spans = vec![
+        Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)),
+        Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(Color::LightCyan)),
+        Span::styled(format!("{:<3} ", io_prio), base_style.fg(Color::White)),
+        Span::styled(format!("{:>9} ", format_io_rate_io_tab(combined_rate)), base_style.fg(combined_fg)),
+        Span::styled(format!("{:>9} ", format_io_rate_io_tab(proc.io_read_rate)), base_style.fg(read_fg)),
+        Span::styled(format!("{:>10} ", format_io_rate_io_tab(proc.io_write_rate)), base_style.fg(write_fg)),
+        Span::styled(format!("{:>5} ", swpd_str), base_style.fg(Color::DarkGray)),
+        Span::styled(format!("{:>5} ", iod_str), base_style.fg(Color::DarkGray)),
+    ];
+
+    // Command with basename highlighting
+    if let Some(pos) = command_truncated.find(base_name.as_str()) {
+        let before = &command_truncated[..pos];
+        let name_part = &command_truncated[pos..pos + base_name.len().min(command_truncated.len() - pos)];
+        let after = &command_truncated[pos + name_part.len()..];
+        if !before.is_empty() {
+            spans.push(Span::styled(before.to_string(), base_style.fg(Color::White)));
+        }
+        spans.push(Span::styled(
+            name_part.to_string(),
+            base_style.fg(Color::Magenta).add_modifier(Modifier::BOLD),
+        ));
+        if !after.is_empty() {
+            spans.push(Span::styled(after.to_string(), base_style.fg(Color::White)));
+        }
+    } else {
+        spans.push(Span::styled(command_truncated, base_style.fg(Color::White)));
+    }
+
+    Line::from(spans)
 }

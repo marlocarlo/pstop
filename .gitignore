@@ -3,3 +3,4 @@
 # Executables
 *.exe
 *.pdb
+build_result.txt

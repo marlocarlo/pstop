@@ -18,6 +18,9 @@ use crate::app::{App, AppMode};
 
 /// Calculate the header height based on number of CPU cores (htop layout)
 pub fn header_height(app: &App) -> u16 {
+    if app.compact_mode {
+        return 2; // 1 aggregate CPU bar + 1 Mem bar
+    }
     let cores = app.cpu_info.cores.len();
     let half = (cores + 1) / 2;
     // Left column: half cores + Mem + Swap + Net

@@ -18,6 +18,12 @@ use crate::system::memory::format_bytes;
 ///
 /// RIGHT side overlays (after CPUs): Tasks, Load average, Uptime
 pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
+    // Compact mode: single aggregate CPU bar + memory bar
+    if app.compact_mode {
+        draw_compact_header(f, app, area);
+        return;
+    }
+
     let cores = &app.cpu_info.cores;
     let half = (cores.len() + 1) / 2; // Left column gets ceil(n/2) cores
 
@@ -91,6 +97,45 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     if right_cpu_count + 2 < right_chunks.len() {
         draw_uptime_line(f, app, right_chunks[right_cpu_count + 2]);
     }
+}
+
+/// Compact header for small screens/mobile: 1 aggregate CPU bar + 1 Mem bar
+fn draw_compact_header(f: &mut Frame, app: &App, area: Rect) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(area);
+
+    // Aggregate CPU bar
+    let cores = &app.cpu_info.cores;
+    let avg_usage: f64 = if cores.is_empty() {
+        0.0
+    } else {
+        cores.iter().map(|c| c.usage_percent as f64).sum::<f64>() / cores.len() as f64
+    };
+    let cs = &app.color_scheme;
+    let label = format!("CPU[{}]", cores.len());
+    let pct_label = format!("{:>5.1}%", avg_usage);
+    let bar_width = rows[0].width as usize;
+    let available = bar_width.saturating_sub(label.len() + pct_label.len() + 3);
+    let total_filled = ((avg_usage / 100.0) * available as f64) as usize;
+    let total_filled = total_filled.min(available);
+    let green_portion = (total_filled as f64 * 0.7) as usize;
+    let red_portion = total_filled.saturating_sub(green_portion);
+    let empty = available.saturating_sub(total_filled);
+    let line = Line::from(vec![
+        Span::styled(&label, Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD)),
+        Span::styled("[", Style::default().fg(cs.cpu_label)),
+        Span::styled("|".repeat(green_portion), Style::default().fg(cs.cpu_bar_normal)),
+        Span::styled("|".repeat(red_portion), Style::default().fg(cs.cpu_bar_system)),
+        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
+        Span::styled("]", Style::default().fg(cs.cpu_label)),
+        Span::styled(pct_label, Style::default().fg(cs.cpu_label)),
+    ]);
+    f.render_widget(Paragraph::new(line), rows[0]);
+
+    // Memory bar (reuse existing logic inline for compactness)
+    draw_memory_bar(f, app, rows[1]);
 }
 
 /// Draw a single CPU core usage bar with htop's multi-color scheme:

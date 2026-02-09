@@ -131,6 +131,9 @@ pub struct App {
 
     // Tick counter for refresh
     pub tick: u64,
+
+    // Compact mode: minimal header for small screens/mobile
+    pub compact_mode: bool,
 }
 
 /// Windows "signals" for kill menu (mapped to taskkill behavior)
@@ -231,6 +234,8 @@ impl App {
             color_scheme: ColorScheme::from_id(ColorSchemeId::Default),
 
             tick: 0,
+
+            compact_mode: false,
         }
     }
 

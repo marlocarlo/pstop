@@ -21,13 +21,13 @@ mod mouse;
 mod system;
 mod ui;
 
-use std::io;
+use std::io::{self, BufWriter};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
-    execute,
+    execute, queue,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
@@ -46,12 +46,16 @@ fn main() -> Result<()> {
             "--install-alias" => {
                 return install_htop_alias();
             }
+            "--compact" | "-c" => {
+                // Compact mode handled below during app init
+            }
             "--help" | "-h" => {
                 println!("pstop — An htop-like system monitor for Windows");
                 println!();
                 println!("Usage: pstop [OPTIONS]");
                 println!();
                 println!("Options:");
+                println!("  --compact, -c     Compact mode (minimal header, ideal for small screens/mobile)");
                 println!("  --install-alias   Add 'htop' alias to your PowerShell profile");
                 println!("  --help, -h        Show this help message");
                 return Ok(());
@@ -64,17 +68,22 @@ fn main() -> Result<()> {
         }
     }
 
+    let compact = args.iter().any(|a| a == "--compact" || a == "-c");
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
-    let backend = CrosstermBackend::new(stdout);
+    // Wrap stdout in BufWriter to batch escape sequences into fewer write syscalls,
+    // significantly reducing flicker when running inside terminal multiplexers.
+    let buffered = BufWriter::with_capacity(16384, stdout);
+    let backend = CrosstermBackend::new(buffered);
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
     // Run the app
-    let result = run_app(&mut terminal);
+    let result = run_app(&mut terminal, compact);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -94,8 +103,9 @@ fn main() -> Result<()> {
 }
 
 /// Main application loop
-fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
+fn run_app(terminal: &mut Terminal<CrosstermBackend<BufWriter<io::Stdout>>>, compact: bool) -> Result<()> {
     let mut app = App::new();
+    app.compact_mode = compact;
     let mut collector = Collector::new();
 
     // Load saved configuration
@@ -119,8 +129,13 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> 
             5
         };
 
-        // Draw
+        // Wrap the draw in synchronized output to prevent flicker inside
+        // terminal multiplexers (psmux, tmux, etc.).
+        use std::io::Write;
+        queue!(terminal.backend_mut(), crossterm::terminal::BeginSynchronizedUpdate)?;
         terminal.draw(|f| ui::draw(f, &app))?;
+        queue!(terminal.backend_mut(), crossterm::terminal::EndSynchronizedUpdate)?;
+        terminal.backend_mut().flush()?;
 
         // Check if we should quit before waiting for events
         if app.should_quit {

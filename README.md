@@ -25,6 +25,7 @@
 </p>
 
 <p align="center">
+  <a href="https://crates.io/crates/pstop"><img src="https://img.shields.io/crates/v/pstop?style=flat-square&color=fc8d62&logo=rust" alt="crates.io"/></a>
   <img src="https://img.shields.io/badge/platform-windows-blue?style=flat-square&logo=windows" alt="Windows"/>
   <img src="https://img.shields.io/badge/language-rust-orange?style=flat-square&logo=rust" alt="Rust"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
@@ -60,13 +61,21 @@ If you've ever missed `htop` on Windows, your search is over. **pstop** brings t
 
 ## Installation
 
-### From Source (Recommended)
+### From crates.io (Recommended)
+
+```powershell
+cargo install pstop
+```
+
+This installs **both** `pstop` and `htop` commands. Yes, you can just type `htop` on Windows.
+
+> **Don't have Rust/Cargo?** Install it in seconds: <https://rustup.rs>
+
+### From GitHub (Latest)
 
 ```powershell
 cargo install --git https://github.com/marlocarlo/pstop
 ```
-
-This installs **both** `pstop` and `htop` commands. Yes, you can just type `htop` on Windows.
 
 ### Build Locally
 
@@ -228,7 +237,7 @@ Format: simple `key=value` (htoprc-style). Persisted settings include:
 
 ## Roadmap
 
-- [ ] Publish to crates.io (`cargo install pstop`)
+- [x] Publish to crates.io (`cargo install pstop`)
 - [ ] Pre-built binaries via GitHub Releases
 - [ ] winget / scoop / chocolatey packages
 - [ ] GPU monitoring

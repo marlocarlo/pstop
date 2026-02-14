@@ -2,14 +2,16 @@
 name = "pstop"
 version = "0.1.0"
 edition = "2021"
-description = "htop alternative for Windows PowerShell. Beautiful, fast system monitor with per-core CPU bars, memory/swap/network monitoring, tree view, 7 color schemes, mouse support. Built in Rust."
+description = "htop for Windows — beautiful, fast TUI system monitor with per-core CPU bars, memory/swap/network, tree view, process management, 7 color schemes, mouse support. Drop-in htop replacement for PowerShell & Windows Terminal."
 license = "MIT"
 repository = "https://github.com/marlocarlo/pstop"
 homepage = "https://github.com/marlocarlo/pstop"
+documentation = "https://github.com/marlocarlo/pstop#readme"
 readme = "README.md"
 keywords = ["htop", "top", "system-monitor", "process-viewer", "windows"]
 categories = ["command-line-utilities", "os::windows-apis"]
 authors = ["marlocarlo"]
+exclude = ["target/", "image.png", ".github/"]
 
 [[bin]]
 name = "pstop"

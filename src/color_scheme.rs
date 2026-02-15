@@ -219,10 +219,10 @@ impl ColorScheme {
             col_command_basename: Color::Green,
             col_thread: Color::Blue,
 
-            footer_key_fg: Color::Black,
-            footer_key_bg: Color::Cyan,
+            footer_key_fg: Color::White,
+            footer_key_bg: Color::Black,
             footer_label_fg: Color::Black,
-            footer_label_bg: Color::Blue,
+            footer_label_bg: Color::Cyan,
 
             tab_active_bg: Color::Cyan,
             tab_active_fg: Color::Black,
@@ -298,10 +298,10 @@ impl ColorScheme {
             col_command_basename: Color::White,
             col_thread: Color::White,
 
-            footer_key_fg: Color::Black,
-            footer_key_bg: Color::White,
-            footer_label_fg: Color::White,
-            footer_label_bg: Color::Reset,
+            footer_key_fg: Color::White,
+            footer_key_bg: Color::Black,
+            footer_label_fg: Color::Black,
+            footer_label_bg: Color::White,
 
             tab_active_bg: Color::White,
             tab_active_fg: Color::Black,
@@ -377,10 +377,10 @@ impl ColorScheme {
             col_command_basename: Color::Green,
             col_thread: Color::Indexed(33),
 
-            footer_key_fg: Color::Black,
-            footer_key_bg: Color::Cyan,
-            footer_label_fg: Color::Indexed(250),
-            footer_label_bg: Color::Black,
+            footer_key_fg: Color::Cyan,
+            footer_key_bg: Color::Black,
+            footer_label_fg: Color::Black,
+            footer_label_bg: Color::Green,
 
             tab_active_bg: Color::Cyan,
             tab_active_fg: Color::Black,
@@ -535,10 +535,10 @@ impl ColorScheme {
             col_command_basename: Color::Yellow,
             col_thread: Color::Cyan,
 
-            footer_key_fg: Color::Blue,
-            footer_key_bg: Color::Yellow,
-            footer_label_fg: Color::White,
-            footer_label_bg: Color::Blue,
+            footer_key_fg: Color::White,
+            footer_key_bg: Color::Blue,
+            footer_label_fg: Color::Black,
+            footer_label_bg: Color::Cyan,
 
             tab_active_bg: Color::Cyan,
             tab_active_fg: Color::Blue,

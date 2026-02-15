@@ -457,7 +457,7 @@ fn truncate_str(s: &str, max: usize) -> String {
 /// Format I/O rate (bytes/second) in human-readable form (e.g., "1.5M/s", "23K/s")
 fn format_io_rate(rate: f64) -> String {
     if rate == 0.0 {
-        "0".to_string()
+        "0B/s".to_string()
     } else if rate < 1024.0 {
         format!("{}B/s", rate as u64)
     } else if rate < 1024.0 * 1024.0 {

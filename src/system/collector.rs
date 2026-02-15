@@ -186,6 +186,7 @@ impl Collector {
 
     fn collect_processes(&mut self, app: &mut App) {
         let total_mem = self.sys.total_memory();
+        let uptime = System::uptime();
         let mut running = 0usize;
         let mut sleeping = 0usize;
         let mut total_threads = 0usize;
@@ -296,7 +297,7 @@ impl Collector {
                     shared_mem: 0, // Not easily available on Windows
                     cpu_usage,
                     mem_usage: mem_pct,
-                    run_time,
+                    run_time: run_time.min(uptime),
                     threads,
                     io_read_rate,
                     io_write_rate,

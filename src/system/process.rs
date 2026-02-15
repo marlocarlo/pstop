@@ -157,17 +157,22 @@ pub struct ProcessInfo {
 
 impl ProcessInfo {
     /// Format run time as h:MM:SS or M:SS.cc (hundredths) — matches htop TIME+
+    /// Output is always ≤ 9 chars to fit within the column width.
     pub fn format_time(&self) -> String {
         let total = self.run_time;
         let hours = total / 3600;
         let minutes = (total % 3600) / 60;
         let seconds = total % 60;
-        let centiseconds = 0u64; // We don't have sub-second from sysinfo
 
-        if hours > 0 {
+        if hours >= 100 {
+            // Very long uptimes: compact days format (e.g. "4d04:08")
+            let days = hours / 24;
+            let rem_hours = hours % 24;
+            format!("{}d{:02}:{:02}", days, rem_hours, minutes)
+        } else if hours > 0 {
             format!("{}:{:02}:{:02}", hours, minutes, seconds)
         } else {
-            format!("{}:{:02}.{:02}", minutes, seconds, centiseconds)
+            format!("{}:{:02}.{:02}", minutes, seconds, 0)
         }
     }
 }

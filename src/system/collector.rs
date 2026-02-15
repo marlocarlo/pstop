@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use sysinfo::{System, ProcessStatus as SysProcessStatus, ProcessesToUpdate, Users, Networks};
+use sysinfo::{System, ProcessStatus as SysProcessStatus, ProcessesToUpdate, Networks};
 
 use crate::app::App;
 use crate::system::cpu::{CpuCore, CpuInfo};
@@ -12,10 +12,9 @@ use crate::system::winapi;
 /// System data collector using the `sysinfo` crate, with Windows user resolution
 pub struct Collector {
     sys: System,
-    users: Users,
     networks: Networks,
-    /// Cache: sysinfo user_id string -> resolved display name
-    user_cache: HashMap<String, String>,
+    /// Cache: PID -> resolved user name (via Win32 token lookup)
+    user_name_cache: HashMap<u32, String>,
     /// Cache: Win32 process data (priority, threads) - updated every 3 ticks
     win_data_cache: HashMap<u32, winapi::WinProcessData>,
     win_data_cache_ticks: u64,
@@ -42,14 +41,12 @@ impl Collector {
         std::thread::sleep(std::time::Duration::from_millis(100));
         sys.refresh_cpu_all();
 
-        let users = Users::new_with_refreshed_list();
         let networks = Networks::new_with_refreshed_list();
 
         Self {
             sys,
-            users,
             networks,
-            user_cache: HashMap::new(),
+            user_name_cache: HashMap::new(),
             win_data_cache: HashMap::new(),
             win_data_cache_ticks: 0,
             prev_io_counters: HashMap::new(),
@@ -192,7 +189,7 @@ impl Collector {
         let mut total_threads = 0usize;
 
         // Collect raw process data first (no &mut self needed)
-        let raw_procs: Vec<(u32, u32, String, String, Option<String>, SysProcessStatus, u64, u64, f32, f32, u64)> = self.sys.processes()
+        let raw_procs: Vec<(u32, u32, String, String, SysProcessStatus, u64, u64, f32, f32, u64)> = self.sys.processes()
             .iter()
             .map(|(&pid, proc_info)| {
                 let resident = proc_info.memory();
@@ -214,10 +211,9 @@ impl Collector {
                 };
 
                 let ppid = proc_info.parent().map(|p| p.as_u32()).unwrap_or(0);
-                let uid_str = proc_info.user_id().map(|u| u.to_string());
                 let name = proc_info.name().to_string_lossy().to_string();
 
-                (pid.as_u32(), ppid, name, command, uid_str, proc_info.status(), virt, resident, proc_info.cpu_usage(), mem_pct, proc_info.run_time())
+                (pid.as_u32(), ppid, name, command, proc_info.status(), virt, resident, proc_info.cpu_usage(), mem_pct, proc_info.run_time())
             })
             .collect();
 
@@ -226,6 +222,8 @@ impl Collector {
         let all_pids: Vec<u32> = raw_procs.iter().map(|(pid, ..)| *pid).collect();
         if self.win_data_cache_ticks == 0 || self.win_data_cache_ticks % 3 == 0 {
             self.win_data_cache = winapi::collect_process_data(&all_pids);
+            // Also refresh user names (same cadence — users don't change often)
+            self.user_name_cache = winapi::batch_process_users(&all_pids);
         }
         self.win_data_cache_ticks += 1;
         // Clone the cache to avoid borrow checker issues
@@ -234,9 +232,12 @@ impl Collector {
         // I/O counters MUST be fetched every tick for accurate rate calculation
         let io_counters = winapi::batch_io_counters(&all_pids);
 
-        // Now resolve users (needs &mut self for cache) and merge Win32 data
+        // User names resolved via Win32 API
+        let user_names = self.user_name_cache.clone();
+
+        // Merge Win32 data into process list
         let processes: Vec<ProcessInfo> = raw_procs.into_iter()
-            .map(|(pid, ppid, name, command, uid_str, sys_status, virt, resident, cpu_usage, mem_pct, run_time)| {
+            .map(|(pid, ppid, name, command, sys_status, virt, resident, cpu_usage, mem_pct, run_time)| {
                 let status = match sys_status {
                     SysProcessStatus::Run => {
                         running += 1;
@@ -254,7 +255,7 @@ impl Collector {
                     }
                 };
 
-                let user_name = self.resolve_user_by_uid(uid_str.as_deref());
+                let user_name = user_names.get(&pid).cloned().unwrap_or_else(|| "SYSTEM".to_string());
 
                 // Get Win32 data (priority, nice, thread count, I/O counters)
                 let wd = win_data.get(&pid);
@@ -338,42 +339,5 @@ impl Collector {
         app.load_avg_1 = self.load_samples_1;
         app.load_avg_5 = self.load_samples_5;
         app.load_avg_15 = self.load_samples_15;
-    }
-
-    /// Resolve user name from a uid string (already extracted from process)
-    fn resolve_user_by_uid(&mut self, uid_str: Option<&str>) -> String {
-        match uid_str {
-            Some(uid) => {
-                if let Some(cached) = self.user_cache.get(uid) {
-                    return cached.clone();
-                }
-                // Search sysinfo Users list by string match
-                let name = self.users.iter()
-                    .find(|u| u.id().to_string() == uid)
-                    .map(|u| u.name().to_string())
-                    .unwrap_or_else(|| {
-                        extract_short_sid(uid)
-                    });
-                self.user_cache.insert(uid.to_string(), name.clone());
-                name
-            }
-            None => "SYSTEM".to_string(),
-        }
-    }
-}
-
-/// Extract a short name from a Windows SID string if user resolution fails
-fn extract_short_sid(sid: &str) -> String {
-    // Windows SIDs look like S-1-5-21-xxx-xxx-xxx-1001
-    // Take last segment as a short identifier
-    if let Some(last) = sid.rsplit('-').next() {
-        match last {
-            "18" => "SYSTEM".to_string(),
-            "19" => "LOCAL SVC".to_string(),
-            "20" => "NET SVC".to_string(),
-            _ => format!("UID:{}", last),
-        }
-    } else {
-        sid.to_string()
     }
 }

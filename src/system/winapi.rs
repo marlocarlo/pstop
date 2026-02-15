@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::mem;
 
-use windows::Win32::Foundation::{CloseHandle, MAX_PATH, HMODULE};
+use windows::Win32::Foundation::{CloseHandle, MAX_PATH, HMODULE, HANDLE};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next,
     TH32CS_SNAPTHREAD, THREADENTRY32,
@@ -17,11 +17,15 @@ use windows::Win32::System::ProcessStatus::{
 };
 use windows::Win32::System::Threading::{
     GetPriorityClass, OpenProcess, SetPriorityClass, GetProcessIoCounters,
-    GetProcessAffinityMask, SetProcessAffinityMask,
+    GetProcessAffinityMask, SetProcessAffinityMask, OpenProcessToken,
     ABOVE_NORMAL_PRIORITY_CLASS, BELOW_NORMAL_PRIORITY_CLASS,
     HIGH_PRIORITY_CLASS, IDLE_PRIORITY_CLASS, NORMAL_PRIORITY_CLASS,
     REALTIME_PRIORITY_CLASS, PROCESS_QUERY_INFORMATION, PROCESS_SET_INFORMATION,
-    IO_COUNTERS,
+    PROCESS_QUERY_LIMITED_INFORMATION, IO_COUNTERS,
+};
+use windows::Win32::Security::{
+    GetTokenInformation, LookupAccountSidW, TokenUser, TOKEN_QUERY, TOKEN_USER,
+    SID_NAME_USE,
 };
 
 /// Per-process data collected via Windows API (cached every N ticks)
@@ -296,6 +300,78 @@ pub fn get_cpu_count() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
+}
+
+/// Batch-resolve process owners via Win32 OpenProcessToken + LookupAccountSidW.
+/// Returns HashMap<pid, username_string>.
+/// For processes we can't query (system/protected), returns well-known names.
+pub fn batch_process_users(pids: &[u32]) -> HashMap<u32, String> {
+    let mut result = HashMap::with_capacity(pids.len());
+    for &pid in pids {
+        let name = get_process_user(pid).unwrap_or_else(|| "SYSTEM".to_string());
+        result.insert(pid, name);
+    }
+    result
+}
+
+/// Resolve the owning user of a single process via its security token.
+fn get_process_user(pid: u32) -> Option<String> {
+    if pid == 0 || pid == 4 {
+        return Some("SYSTEM".to_string());
+    }
+
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+
+        let mut token_handle = HANDLE::default();
+        if OpenProcessToken(handle, TOKEN_QUERY, &mut token_handle).is_err() {
+            let _ = CloseHandle(handle);
+            return None;
+        }
+
+        let mut needed: u32 = 0;
+        let _ = GetTokenInformation(token_handle, TokenUser, None, 0, &mut needed);
+        if needed == 0 {
+            let _ = CloseHandle(token_handle);
+            let _ = CloseHandle(handle);
+            return None;
+        }
+
+        let mut buffer = vec![0u8; needed as usize];
+        if GetTokenInformation(
+            token_handle, TokenUser,
+            Some(buffer.as_mut_ptr() as *mut _), needed, &mut needed,
+        ).is_err() {
+            let _ = CloseHandle(token_handle);
+            let _ = CloseHandle(handle);
+            return None;
+        }
+
+        let token_user = &*(buffer.as_ptr() as *const TOKEN_USER);
+        let sid = token_user.User.Sid;
+
+        let mut name_len: u32 = 256;
+        let mut domain_len: u32 = 256;
+        let mut name_buf = vec![0u16; name_len as usize];
+        let mut domain_buf = vec![0u16; domain_len as usize];
+        let mut sid_type = SID_NAME_USE::default();
+
+        let ok = LookupAccountSidW(
+            None, sid,
+            windows::core::PWSTR(name_buf.as_mut_ptr()), &mut name_len,
+            windows::core::PWSTR(domain_buf.as_mut_ptr()), &mut domain_len,
+            &mut sid_type,
+        );
+
+        let _ = CloseHandle(token_handle);
+        let _ = CloseHandle(handle);
+
+        if ok.is_ok() {
+            Some(String::from_utf16_lossy(&name_buf[..name_len as usize]))
+        } else {
+            None
+        }
+    }
 }
 
 /// Handle information for display in lsof-style viewer

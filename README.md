@@ -35,7 +35,7 @@
 ---
 
 <p align="center">
-  <img src="image.png" alt="pstop screenshot - htop for Windows PowerShell" width="900"/>
+  <img src="pstop-demo.gif" alt="pstop demo - htop for Windows PowerShell" width="900"/>
 </p>
 
 ---

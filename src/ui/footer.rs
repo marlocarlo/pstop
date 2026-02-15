@@ -48,10 +48,11 @@ const FKEYS_FILTER: &[(&str, &str)] = &[
 ];
 
 /// Draw the bottom F-key bar (exact htop styling)
-/// htop uses: Fn key in black-on-cyan, description in white-on-black
+/// htop evenly distributes 10 F-key buttons across the full terminal width.
+/// Each button: Fn key in black-on-cyan, label in black-on-blue (default scheme).
 pub fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let cs = &app.color_scheme;
-    // Full-width dark background first
+    // Full-width background fill
     let bg_fill = " ".repeat(area.width as usize);
     f.render_widget(
         Paragraph::new(bg_fill).style(Style::default().bg(cs.footer_label_bg)),
@@ -64,15 +65,42 @@ pub fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         _ => FKEYS_NORMAL,
     };
 
+    // Collect active (non-empty) entries
+    let active: Vec<(&str, &str)> = fkeys.iter()
+        .filter(|(k, _)| !k.is_empty())
+        .copied()
+        .collect();
+
+    let total_width = area.width as usize;
+    let n = active.len();
+    if n == 0 {
+        return;
+    }
+
+    // htop distributes items evenly: each slot = total_width / n
+    let slot_width = total_width / n;
+
     let mut spans: Vec<Span> = Vec::new();
 
-    for (key, desc) in fkeys {
-        if key.is_empty() {
-            continue;
-        }
+    for (i, (key, desc)) in active.iter().enumerate() {
+        let key_str = key.to_string();
+        let desc_trimmed = desc.trim_end();
+
+        // Remaining space in this slot for the label
+        let label_width = slot_width.saturating_sub(key_str.len());
+        // Last slot gets any remaining width
+        let label_width = if i == n - 1 {
+            total_width.saturating_sub(slot_width * (n - 1)).saturating_sub(key_str.len())
+        } else {
+            label_width
+        };
+
+        // Pad the label to fill its portion of the slot
+        let padded_desc = format!("{:<width$}", desc_trimmed, width = label_width);
+
         // Key label: styled per color scheme
         spans.push(Span::styled(
-            key.to_string(),
+            key_str,
             Style::default()
                 .fg(cs.footer_key_fg)
                 .bg(cs.footer_key_bg)
@@ -80,7 +108,7 @@ pub fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         ));
         // Description: styled per color scheme
         spans.push(Span::styled(
-            desc.to_string(),
+            padded_desc,
             Style::default()
                 .fg(cs.footer_label_fg)
                 .bg(cs.footer_label_bg),

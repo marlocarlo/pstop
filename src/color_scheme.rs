@@ -221,8 +221,8 @@ impl ColorScheme {
 
             footer_key_fg: Color::Black,
             footer_key_bg: Color::Cyan,
-            footer_label_fg: Color::White,
-            footer_label_bg: Color::Reset,
+            footer_label_fg: Color::Cyan,
+            footer_label_bg: Color::Black,
 
             tab_active_bg: Color::Cyan,
             tab_active_fg: Color::Black,

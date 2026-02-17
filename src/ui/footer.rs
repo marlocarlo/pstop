@@ -22,10 +22,10 @@ const FKEYS_NORMAL: &[(&str, &str)] = &[
 ];
 
 const FKEYS_SEARCH: &[(&str, &str)] = &[
-    ("Esc", "Cancel   "),
+    ("Esc", "Cancel "),
     ("", ""),
-    ("F3", "Next  "),
-    ("", ""),
+    ("F3", "Next "),
+    ("S-F3", "Prev "),
     ("", ""),
     ("", ""),
     ("", ""),

@@ -7,15 +7,25 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use crate::app::App;
 use crate::system::process::ProcessSortField;
 
-/// Draw the sort-by selection menu (F6) — htop-style with arrow-key navigation
+/// Draw the sort-by selection menu (F6) — htop-style with arrow-key navigation and scroll
 pub fn draw_sort_menu(f: &mut Frame, app: &App) {
-    let area = centered_rect(40, 60, f.area());
+    let area = centered_rect(40, 70, f.area());
     f.render_widget(Clear, area);
 
     let fields = ProcessSortField::all();
+    // Available content rows inside border (2 border rows + 2 hint lines + 1 blank)
+    let inner_height = area.height.saturating_sub(2) as usize; // minus top+bottom border
+    let hint_rows = 2; // blank + hint line
+    let visible_items = inner_height.saturating_sub(hint_rows);
+
+    // Calculate scroll offset to keep selected item visible
+    let scroll = app.sort_scroll_offset;
+    let end = (scroll + visible_items).min(fields.len());
+
     let mut lines: Vec<Line> = Vec::new();
 
-    for (i, field) in fields.iter().enumerate() {
+    for i in scroll..end {
+        let field = &fields[i];
         let is_highlighted = i == app.sort_menu_index;
         let is_current = *field == app.sort_field;
 
@@ -44,8 +54,13 @@ pub fn draw_sort_menu(f: &mut Frame, app: &App) {
     }
 
     lines.push(Line::from(""));
+    let scroll_hint = if fields.len() > visible_items {
+        format!(" ↑/↓ Navigate  Enter Select  Esc Cancel  [{}/{}]", app.sort_menu_index + 1, fields.len())
+    } else {
+        " ↑/↓ Navigate  Enter Select  Esc Cancel ".to_string()
+    };
     lines.push(Line::from(Span::styled(
-        " ↑/↓ Navigate  Enter Select  Esc Cancel ",
+        scroll_hint,
         Style::default().fg(Color::DarkGray),
     )));
 

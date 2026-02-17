@@ -62,7 +62,7 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     // --- Left column: CPU cores 0..half ---
     for i in 0..half {
         if i < cores.len() {
-            draw_cpu_bar(f, &cores[i], left_chunks[i], cs);
+            draw_cpu_bar(f, &cores[i], left_chunks[i], cs, app.cpu_count_from_zero);
         }
     }
 
@@ -79,7 +79,7 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     for i in 0..right_cpu_count {
         let core_idx = half + i;
         if core_idx < cores.len() {
-            draw_cpu_bar(f, &cores[core_idx], right_chunks[i], cs);
+            draw_cpu_bar(f, &cores[core_idx], right_chunks[i], cs, app.cpu_count_from_zero);
         }
     }
 
@@ -148,9 +148,10 @@ fn draw_compact_header(f: &mut Frame, app: &App, area: Rect) {
 ///   Green portion  = 0-60% of usage (user estimate)
 ///   Red portion    = 60-100% of usage (kernel estimate)
 ///   This gives the visual multi-color effect matching htop.
-fn draw_cpu_bar(f: &mut Frame, core: &crate::system::cpu::CpuCore, area: Rect, cs: &crate::color_scheme::ColorScheme) {
+fn draw_cpu_bar(f: &mut Frame, core: &crate::system::cpu::CpuCore, area: Rect, cs: &crate::color_scheme::ColorScheme, cpu_from_zero: bool) {
     let usage = core.usage_percent;
-    let label = format!("{:>2}", core.id);
+    let display_id = if cpu_from_zero { core.id } else { core.id + 1 };
+    let label = format!("{:>2}", display_id);
     let pct_label = format!("{:>5.1}%", usage);
 
     let bar_width = area.width as usize;

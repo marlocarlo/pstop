@@ -434,78 +434,84 @@ fn draw_columns_panel(f: &mut Frame, app: &App, area: Rect) {
     let cs = &app.color_scheme;
     let all_fields = ProcessSortField::all();
 
-    // Split: Active columns (left) | Available columns (right)
+    // Split: Column list (left) | Description (right)
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
         .split(area);
 
-    // Active columns
-    let mut active_lines = vec![
+    // All columns with toggle checkmarks
+    let mut col_lines = vec![
         Line::from(Span::styled(
-            " Active Columns",
+            " Columns",
             Style::default().fg(cs.popup_title).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
     ];
 
-    let visible_fields: Vec<&ProcessSortField> = all_fields.iter()
-        .filter(|f| app.visible_columns.contains(f))
-        .collect();
-
-    for (idx, field) in visible_fields.iter().enumerate() {
-        let is_selected = app.setup_panel == 1 && idx == app.setup_menu_index;
-        let bg = if is_selected { Color::Indexed(236) } else { Color::Reset };
-        let fg = if is_selected { Color::Yellow } else { Color::Green };
-
-        active_lines.push(Line::from(Span::styled(
-            format!("  {:<20}", field.long_label()),
-            Style::default().fg(fg).bg(bg),
-        )));
-    }
-
-    active_lines.push(Line::from(""));
-    active_lines.push(Line::from(Span::styled(
-        "  ↑↓=navigate  Space=toggle",
-        Style::default().fg(Color::DarkGray),
-    )));
-    active_lines.push(Line::from(Span::styled(
-        "  a=toggle all",
-        Style::default().fg(Color::DarkGray),
-    )));
-    f.render_widget(Paragraph::new(active_lines), cols[0]);
-
-    // Available columns with descriptions
-    let mut avail_lines = vec![
-        Line::from(Span::styled(
-            " Available Columns",
-            Style::default().fg(cs.popup_title).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
-
-    for field in all_fields {
+    for (idx, field) in all_fields.iter().enumerate() {
         let is_active = app.visible_columns.contains(field);
-        let marker = if is_active { "✓" } else { " " };
-        let fg = if is_active { Color::Green } else { Color::DarkGray };
-        let desc = field_description(field);
-        avail_lines.push(Line::from(vec![
+        let is_selected = app.setup_panel == 1 && idx == app.setup_menu_index;
+
+        let checkbox = if is_active { "[X]" } else { "[ ]" };
+        let check_color = if is_active { Color::Green } else { Color::DarkGray };
+        let bg = if is_selected { Color::Indexed(236) } else { Color::Reset };
+        let fg = if is_selected { Color::Yellow } else if is_active { Color::Green } else { cs.popup_text };
+
+        col_lines.push(Line::from(vec![
+            Span::styled("  ", Style::default().bg(bg)),
             Span::styled(
-                format!("  {} ", marker),
-                Style::default().fg(fg).add_modifier(Modifier::BOLD),
+                format!("{} ", checkbox),
+                Style::default().fg(check_color).bg(bg).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("{:<12}", field.long_label()),
-                Style::default().fg(fg),
-            ),
-            Span::styled(
-                format!(" {}", desc),
-                Style::default().fg(Color::DarkGray),
+                format!("{:<14}", field.long_label()),
+                Style::default().fg(fg).bg(bg),
             ),
         ]));
     }
 
-    f.render_widget(Paragraph::new(avail_lines), cols[1]);
+    col_lines.push(Line::from(""));
+    col_lines.push(Line::from(Span::styled(
+        "  Space=toggle  a=toggle all",
+        Style::default().fg(Color::DarkGray),
+    )));
+    f.render_widget(Paragraph::new(col_lines), cols[0]);
+
+    // Description panel for currently selected column
+    let mut desc_lines = vec![
+        Line::from(Span::styled(
+            " Column Details",
+            Style::default().fg(cs.popup_title).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    if let Some(field) = all_fields.get(app.setup_menu_index) {
+        let is_active = app.visible_columns.contains(field);
+        let desc = field_description(field);
+        desc_lines.push(Line::from(Span::styled(
+            format!("  {}", field.long_label()),
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        )));
+        desc_lines.push(Line::from(Span::styled(
+            format!("  Short: {}", field.label()),
+            Style::default().fg(Color::DarkGray),
+        )));
+        desc_lines.push(Line::from(Span::styled(
+            format!("  {}", desc),
+            Style::default().fg(cs.popup_text),
+        )));
+        desc_lines.push(Line::from(""));
+        let status = if is_active { "Visible" } else { "Hidden" };
+        let status_color = if is_active { Color::Green } else { Color::DarkGray };
+        desc_lines.push(Line::from(Span::styled(
+            format!("  Status: {}", status),
+            Style::default().fg(status_color),
+        )));
+    }
+
+    f.render_widget(Paragraph::new(desc_lines), cols[1]);
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

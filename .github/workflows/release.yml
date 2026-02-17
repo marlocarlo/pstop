@@ -1,0 +1,190 @@
+name: Release & Distribute
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Build release binaries ──────────────────────────────────────────
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binaries
+        run: cargo build --release
+
+      - name: Run tests
+        run: cargo test --release
+
+      - name: Verify binaries exist
+        run: |
+          Test-Path target/release/pstop.exe
+          Test-Path target/release/htop.exe
+
+      - name: Create release archive
+        run: |
+          New-Item -ItemType Directory -Path staging -Force
+          Copy-Item target/release/pstop.exe staging/
+          Copy-Item target/release/htop.exe staging/
+          Copy-Item README.md staging/
+          Copy-Item LICENSE staging/
+          Compress-Archive -Path staging/* -DestinationPath pstop-windows-x86_64.zip
+
+      - name: Compute SHA256 checksum
+        id: checksum
+        run: |
+          $hash = (Get-FileHash pstop-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
+          echo "sha256=$hash" >> $env:GITHUB_OUTPUT
+          echo "SHA256: $hash"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: |
+            pstop-windows-x86_64.zip
+          retention-days: 5
+
+    outputs:
+      sha256: ${{ steps.checksum.outputs.sha256 }}
+
+  # ── Create GitHub Release ───────────────────────────────────────────
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "pstop v${{ steps.version.outputs.version }}"
+          body: |
+            ## pstop v${{ steps.version.outputs.version }}
+
+            **htop for Windows** — beautiful, fast TUI system monitor.
+
+            ### Install
+            ```
+            cargo install pstop
+            ```
+            or
+            ```
+            choco install pstop
+            ```
+
+            ### SHA256
+            `${{ needs.build.outputs.sha256 }}`
+          files: |
+            pstop-windows-x86_64.zip
+          draft: false
+          prerelease: false
+
+  # ── Publish to crates.io ────────────────────────────────────────────
+  publish-crates:
+    needs: build
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --allow-dirty
+
+  # ── Publish to Chocolatey ───────────────────────────────────────────
+  publish-choco:
+    needs: [build, github-release]
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+
+      - name: Compute checksum of zip
+        id: checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash pstop-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
+          echo "sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Prepare Chocolatey package
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          DOWNLOAD_URL: "https://github.com/marlocarlo/pstop/releases/download/v${{ steps.version.outputs.version }}/pstop-windows-x86_64.zip"
+          CHECKSUM: ${{ steps.checksum.outputs.sha256 }}
+        run: |
+          # Update nuspec version
+          $nuspec = Get-Content choco/pstop.nuspec -Raw
+          $nuspec = $nuspec -replace '<version>0\.1\.0</version>', "<version>$env:RELEASE_VERSION</version>"
+          Set-Content choco/pstop.nuspec $nuspec
+
+          # Update install script with download URL and checksum
+          $install = Get-Content choco/tools/chocolateyinstall.ps1 -Raw
+          $install = $install -replace '__DOWNLOAD_URL__', $env:DOWNLOAD_URL
+          $install = $install -replace '__CHECKSUM__', $env:CHECKSUM
+          Set-Content choco/tools/chocolateyinstall.ps1 $install
+
+      - name: Pack Chocolatey package
+        run: |
+          cd choco
+          choco pack pstop.nuspec
+
+      - name: Push to Chocolatey
+        env:
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          cd choco
+          choco push pstop.${{ steps.version.outputs.version }}.nupkg --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY

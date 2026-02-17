@@ -123,8 +123,13 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<BufWriter<io::Stdout>>>, com
         let header_h = ui::header_height(&app) as usize;
         let footer_h = 1;
         let available = size.height as usize;
-        app.visible_rows = if available > header_h + footer_h + 2 {
-            available - header_h - footer_h - 2 // -2 for table header + borders
+        // Account for search/filter bar stealing 1 row from process area
+        let bar_h: usize = if app.mode == app::AppMode::Search
+            || app.mode == app::AppMode::Filter
+            || !app.filter_query.is_empty()
+        { 1 } else { 0 };
+        app.visible_rows = if available > header_h + footer_h + 2 + bar_h {
+            available - header_h - footer_h - 2 - bar_h // -2 for table header + tab bar
         } else {
             5
         };
@@ -162,10 +167,12 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<BufWriter<io::Stdout>>>, com
                     }
                 }
                 Event::Mouse(mouse_event) => {
-                    mouse::handle_mouse(&mut app, mouse_event, size.width, size.height);
-                    if app.should_quit {
-                        let _ = config::PstopConfig::from_app(&app).save();
-                        return Ok(());
+                    if app.enable_mouse {
+                        mouse::handle_mouse(&mut app, mouse_event, size.width, size.height);
+                        if app.should_quit {
+                            let _ = config::PstopConfig::from_app(&app).save();
+                            return Ok(());
+                        }
                     }
                 }
                 Event::Resize(_, _) => {

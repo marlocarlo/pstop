@@ -37,6 +37,9 @@ pub struct App {
     pub should_quit: bool,
     pub paused: bool,       // Z key: freeze/pause updates
 
+    // Current user for shadow_other_users
+    pub current_user: String,
+
     // System data
     pub cpu_info: CpuInfo,
     pub memory_info: MemoryInfo,
@@ -53,9 +56,11 @@ pub struct App {
     pub sort_field: ProcessSortField,
     pub sort_ascending: bool,
     pub sort_menu_index: usize,
+    pub sort_scroll_offset: usize,
 
     // Search (F3) — transient, doesn't filter
     pub search_query: String,
+    pub search_not_found: bool,
 
     // Filter (F4) — persistent filter, hides non-matches
     pub filter_query: String,
@@ -153,6 +158,8 @@ impl App {
             should_quit: false,
             paused: false,
 
+            current_user: std::env::var("USERNAME").unwrap_or_default().to_lowercase(),
+
             cpu_info: CpuInfo::default(),
             memory_info: MemoryInfo::default(),
             network_info: NetworkInfo::default(),
@@ -165,9 +172,11 @@ impl App {
 
             sort_field: ProcessSortField::Cpu,
             sort_ascending: false,
-            sort_menu_index: 9, // CPU% index in all() (0=PID,1=PPID,2=USER,3=PRI,4=NI,5=VIRT,6=RES,7=SHR,8=STATUS,9=CPU)
+            sort_menu_index: 9,
+            sort_scroll_offset: 0,
 
             search_query: String::new(),
+            search_not_found: false,
             filter_query: String::new(),
 
             user_filter: None,
@@ -292,18 +301,24 @@ impl App {
         }
 
         // F4 persistent filter (filter_query)
+        // htop: filters Command column only, supports | for OR, case-insensitive
         if !self.filter_query.is_empty() {
-            let query = self.filter_query.to_lowercase();
+            let query_lower = self.filter_query.to_lowercase();
+            let terms: Vec<&str> = query_lower.split('|').collect();
             self.filtered_processes.retain(|p| {
-                p.name.to_lowercase().contains(&query)
-                    || p.command.to_lowercase().contains(&query)
-                    || p.pid.to_string().contains(&query)
-                    || p.user.to_lowercase().contains(&query)
+                let name_lower = p.name.to_lowercase();
+                let cmd_lower = p.command.to_lowercase();
+                terms.iter().any(|term| {
+                    let t = term.trim();
+                    if t.is_empty() { return false; }
+                    name_lower.contains(t) || cmd_lower.contains(t)
+                })
             });
         }
     }
 
     /// F3 search: find next process matching search_query and jump to it
+    /// htop: searches Command column only, case-insensitive, substring match
     pub fn search_next(&mut self) {
         if self.search_query.is_empty() || self.filtered_processes.is_empty() {
             return;
@@ -318,31 +333,61 @@ impl App {
             let p = &self.filtered_processes[idx];
             if p.name.to_lowercase().contains(&query)
                 || p.command.to_lowercase().contains(&query)
-                || p.pid.to_string().contains(&query)
             {
                 self.selected_index = idx;
+                self.search_not_found = false;
                 self.ensure_visible();
                 return;
             }
         }
+        self.search_not_found = true;
+    }
+
+    /// Shift+F3 search: find previous process matching search_query
+    /// htop: Shift+F3 cycles backwards through matches
+    pub fn search_prev(&mut self) {
+        if self.search_query.is_empty() || self.filtered_processes.is_empty() {
+            return;
+        }
+        let query = self.search_query.to_lowercase();
+        let len = self.filtered_processes.len();
+        let start = if self.selected_index == 0 { len - 1 } else { self.selected_index - 1 };
+
+        // Search backward from current position, wrapping around
+        for offset in 0..len {
+            let idx = (start + len - offset) % len;
+            let p = &self.filtered_processes[idx];
+            if p.name.to_lowercase().contains(&query)
+                || p.command.to_lowercase().contains(&query)
+            {
+                self.selected_index = idx;
+                self.search_not_found = false;
+                self.ensure_visible();
+                return;
+            }
+        }
+        self.search_not_found = true;
     }
 
     /// F3 search: find first match from top (when query changes)
+    /// htop: incremental search jumps to first match as you type
     pub fn search_first(&mut self) {
         if self.search_query.is_empty() || self.filtered_processes.is_empty() {
+            self.search_not_found = false;
             return;
         }
         let query = self.search_query.to_lowercase();
         for (idx, p) in self.filtered_processes.iter().enumerate() {
             if p.name.to_lowercase().contains(&query)
                 || p.command.to_lowercase().contains(&query)
-                || p.pid.to_string().contains(&query)
             {
                 self.selected_index = idx;
+                self.search_not_found = false;
                 self.ensure_visible();
                 return;
             }
         }
+        self.search_not_found = true;
     }
 
     /// Ensure selected_index is visible in the viewport

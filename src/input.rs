@@ -93,6 +93,11 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         // ── F6 — sort menu ──
         KeyCode::F(6) => {
             app.sort_menu_index = app.sort_field.index();
+            app.sort_scroll_offset = 0;
+            // Ensure current selection is visible
+            if app.sort_menu_index >= 10 {
+                app.sort_scroll_offset = app.sort_menu_index.saturating_sub(9);
+            }
             app.mode = AppMode::SortSelect;
         }
 
@@ -239,9 +244,10 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Esc => {
             app.mode = AppMode::Normal;
             app.search_query.clear();
+            app.search_not_found = false;
         }
         KeyCode::Enter => {
-            // Find next match
+            // Find next match (htop behavior)
             app.search_next();
         }
         KeyCode::Backspace => {
@@ -256,8 +262,13 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Down  => app.select_next(),
         KeyCode::F(10) => app.should_quit = true,
         KeyCode::F(3) => {
-            // F3 again = find next
-            app.search_next();
+            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                // Shift+F3 = find previous (htop behavior)
+                app.search_prev();
+            } else {
+                // F3 again = find next
+                app.search_next();
+            }
         }
         _ => {}
     }
@@ -315,16 +326,39 @@ fn handle_help_mode(app: &mut App, key: KeyEvent) {
 
 fn handle_sort_mode(app: &mut App, key: KeyEvent) {
     let field_count = ProcessSortField::all().len();
+    // Estimate visible items in sort menu (70% of terminal, minus borders/hints)
+    // visible_rows approximates process area height; terminal is roughly visible_rows + header + footer + extras
+    let approx_terminal_h = app.visible_rows + 10;
+    let sort_menu_h = (approx_terminal_h * 70 / 100).max(8);
+    let sort_visible = sort_menu_h.saturating_sub(4); // borders (2) + blank + hint line
+
     match key.code {
         KeyCode::Esc => app.mode = AppMode::Normal,
         KeyCode::Up => {
             if app.sort_menu_index > 0 {
                 app.sort_menu_index -= 1;
+                if app.sort_menu_index < app.sort_scroll_offset {
+                    app.sort_scroll_offset = app.sort_menu_index;
+                }
             }
         }
         KeyCode::Down => {
             if app.sort_menu_index + 1 < field_count {
                 app.sort_menu_index += 1;
+                // Scroll down if cursor goes past visible area
+                if app.sort_menu_index >= app.sort_scroll_offset + sort_visible {
+                    app.sort_scroll_offset = app.sort_menu_index - sort_visible + 1;
+                }
+            }
+        }
+        KeyCode::Home => {
+            app.sort_menu_index = 0;
+            app.sort_scroll_offset = 0;
+        }
+        KeyCode::End => {
+            app.sort_menu_index = field_count.saturating_sub(1);
+            if app.sort_menu_index >= sort_visible {
+                app.sort_scroll_offset = app.sort_menu_index - sort_visible + 1;
             }
         }
         KeyCode::Enter => {
@@ -363,7 +397,7 @@ fn handle_kill_mode(app: &mut App, key: KeyEvent) {
             };
 
             for pid in pids {
-                kill_process(pid);
+                kill_process_with_signal(pid, app.kill_signal_index);
             }
             app.tagged_pids.clear();
             app.mode = AppMode::Normal;
@@ -488,12 +522,7 @@ fn handle_setup_mode(app: &mut App, key: KeyEvent) {
         0 => 3,  // 4 meters per column
         1 => 14, // 14 display options + interval row
         2 => ColorSchemeId::all().len().saturating_sub(1),
-        3 => {
-            let visible_count = all_fields.iter()
-                .filter(|f| app.visible_columns.contains(f))
-                .count();
-            visible_count.saturating_sub(1)
-        }
+        3 => all_fields.len().saturating_sub(1), // All fields, not just visible ones
         _ => 0,
     };
 
@@ -571,16 +600,14 @@ fn handle_setup_mode(app: &mut App, key: KeyEvent) {
                         app.color_scheme = ColorScheme::from_id(new_id);
                     }
                     3 => {
-                        // Toggle column visibility
-                        let visible_fields: Vec<ProcessSortField> = all_fields.iter()
-                            .filter(|f| app.visible_columns.contains(f))
-                            .cloned()
-                            .collect();
-                        if let Some(&field) = visible_fields.get(app.setup_menu_index) {
+                        // Toggle column visibility (add or remove)
+                        if let Some(&field) = all_fields.get(app.setup_menu_index) {
                             if field != ProcessSortField::Command {
-                                app.visible_columns.remove(&field);
-                                if app.setup_menu_index > 0 {
-                                    app.setup_menu_index -= 1;
+                                // Command is always visible
+                                if app.visible_columns.contains(&field) {
+                                    app.visible_columns.remove(&field);
+                                } else {
+                                    app.visible_columns.insert(field);
                                 }
                             }
                         }
@@ -620,11 +647,25 @@ fn handle_setup_mode(app: &mut App, key: KeyEvent) {
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /// Kill a process by PID on Windows using taskkill
-fn kill_process(pid: u32) {
+/// signal_index: 0=SIGTERM (graceful), 1=SIGKILL (force), etc.
+fn kill_process_with_signal(pid: u32, signal_index: usize) {
     use std::process::Command;
-    let _ = Command::new("taskkill")
-        .args(["/F", "/PID", &pid.to_string()])
-        .output();
+    match signal_index {
+        0 => {
+            // SIGTERM equivalent: try graceful close via taskkill without /F
+            let result = Command::new("taskkill")
+                .args(["/PID", &pid.to_string()])
+                .output();
+            // If graceful fails, don't force — user chose graceful
+            let _ = result;
+        }
+        _ => {
+            // SIGKILL and others: force kill
+            let _ = Command::new("taskkill")
+                .args(["/F", "/PID", &pid.to_string()])
+                .output();
+        }
+    }
 }
 
 /// Cycle through sort fields

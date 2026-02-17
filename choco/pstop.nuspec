@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>pstop</id>
+    <version>0.2.0</version>
+    <title>pstop - htop for Windows</title>
+    <authors>marlocarlo</authors>
+    <owners>marlocarlo</owners>
+    <projectUrl>https://github.com/marlocarlo/pstop</projectUrl>
+    <licenseUrl>https://github.com/marlocarlo/pstop/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/marlocarlo/pstop</projectSourceUrl>
+    <bugTrackerUrl>https://github.com/marlocarlo/pstop/issues</bugTrackerUrl>
+    <tags>htop top system-monitor process-viewer tui terminal windows rust</tags>
+    <summary>htop for Windows — beautiful, fast TUI system monitor</summary>
+    <description>pstop is a full drop-in replacement for htop on Windows. Beautiful TUI system monitor with per-core CPU bars, memory/swap/network monitoring, tree view, process management, search/filter, 7 color schemes, and full mouse support. Installs both `pstop` and `htop` commands.</description>
+    <releaseNotes>https://github.com/marlocarlo/pstop/releases</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

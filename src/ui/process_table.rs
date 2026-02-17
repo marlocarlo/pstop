@@ -185,11 +185,15 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
     // Search / Filter bar
     if let Some(bar_rect) = bar_area {
         let bar_line = if app.mode == AppMode::Search {
-            Line::from(vec![
+            let mut spans = vec![
                 Span::styled("Search: ", Style::default().fg(cs.search_label).add_modifier(Modifier::BOLD)),
                 Span::styled(app.search_query.clone(), Style::default().fg(cs.search_text)),
                 Span::styled("_", Style::default().fg(cs.search_text).add_modifier(Modifier::SLOW_BLINK)),
-            ])
+            ];
+            if app.search_not_found {
+                spans.push(Span::styled("  Not found", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)));
+            }
+            Line::from(spans)
         } else if app.mode == AppMode::Filter {
             Line::from(vec![
                 Span::styled("Filter: ", Style::default().fg(cs.filter_label).add_modifier(Modifier::BOLD)),
@@ -345,19 +349,24 @@ fn build_process_row(
     }
 
     // Command with basename highlighting (htop shows the process name in a different color)
-    if let Some(pos) = command_truncated.find(base_name.as_str()) {
-        let before = &command_truncated[..pos];
-        let name_part = &command_truncated[pos..pos + base_name.len().min(command_truncated.len() - pos)];
-        let after = &command_truncated[pos + name_part.len()..];
-        if !before.is_empty() {
-            spans.push(Span::styled(before.to_string(), base_style.fg(cs.col_command)));
-        }
-        spans.push(Span::styled(
-            name_part.to_string(),
-            base_style.fg(cs.col_command_basename).add_modifier(Modifier::BOLD),
-        ));
-        if !after.is_empty() {
-            spans.push(Span::styled(after.to_string(), base_style.fg(cs.col_command)));
+    // Controlled by highlight_base_name display option
+    if app.highlight_base_name {
+        if let Some(pos) = command_truncated.find(base_name.as_str()) {
+            let before = &command_truncated[..pos];
+            let name_part = &command_truncated[pos..pos + base_name.len().min(command_truncated.len() - pos)];
+            let after = &command_truncated[pos + name_part.len()..];
+            if !before.is_empty() {
+                spans.push(Span::styled(before.to_string(), base_style.fg(cs.col_command)));
+            }
+            spans.push(Span::styled(
+                name_part.to_string(),
+                base_style.fg(cs.col_command_basename).add_modifier(Modifier::BOLD),
+            ));
+            if !after.is_empty() {
+                spans.push(Span::styled(after.to_string(), base_style.fg(cs.col_command)));
+            }
+        } else {
+            spans.push(Span::styled(command_truncated, base_style.fg(cs.col_command)));
         }
     } else {
         spans.push(Span::styled(command_truncated, base_style.fg(cs.col_command)));

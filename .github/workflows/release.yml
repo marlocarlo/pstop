@@ -306,7 +306,7 @@ jobs:
           PackageName: pstop
           PackageUrl: https://github.com/marlocarlo/pstop
           License: MIT
-          LicenseUrl: https://github.com/marlocarlo/pstop/blob/main/LICENSE
+          LicenseUrl: https://github.com/marlocarlo/pstop/blob/master/LICENSE
           ShortDescription: htop for Windows — beautiful, fast TUI system monitor
           Description: |-
             pstop is a full drop-in replacement for htop on Windows. Beautiful TUI system monitor

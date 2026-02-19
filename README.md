@@ -26,6 +26,8 @@
 
 <p align="center">
   <a href="https://crates.io/crates/pstop"><img src="https://img.shields.io/crates/v/pstop?style=flat-square&color=fc8d62&logo=rust" alt="crates.io"/></a>
+  <a href="https://community.chocolatey.org/packages/pstop"><img src="https://img.shields.io/chocolatey/v/pstop?style=flat-square&color=7B3F00&logo=chocolatey" alt="Chocolatey"/></a>
+  <a href="https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/marlocarlo/pstop"><img src="https://img.shields.io/badge/winget-marlocarlo.pstop-0078D4?style=flat-square&logo=windows" alt="WinGet"/></a>
   <img src="https://img.shields.io/badge/platform-windows-blue?style=flat-square&logo=windows" alt="Windows"/>
   <img src="https://img.shields.io/badge/language-rust-orange?style=flat-square&logo=rust" alt="Rust"/>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
@@ -61,17 +63,31 @@ If you've ever missed `htop` on Windows, your search is over. **pstop** brings t
 
 ## Installation
 
-### From crates.io (Recommended)
+### WinGet (Recommended)
+
+```powershell
+winget install marlocarlo.pstop
+```
+
+### Chocolatey
+
+```powershell
+choco install pstop
+```
+
+### Cargo (crates.io)
 
 ```powershell
 cargo install pstop
 ```
 
-This installs **both** `pstop` and `htop` commands. Yes, you can just type `htop` on Windows.
-
 > **Don't have Rust/Cargo?** Install it in seconds: <https://rustup.rs>
 
-### From GitHub (Latest)
+### From GitHub Releases
+
+Download the latest `.zip` from [GitHub Releases](https://github.com/marlocarlo/pstop/releases), extract, and add to your `PATH`.
+
+### From Source
 
 ```powershell
 cargo install --git https://github.com/marlocarlo/pstop
@@ -85,6 +101,8 @@ cd pstop
 cargo build --release
 # Binary at: target/release/pstop.exe + target/release/htop.exe
 ```
+
+All methods install **both** `pstop` and `htop` commands. Yes, you can just type `htop` on Windows.
 
 ### Add htop Alias (Optional)
 
@@ -238,8 +256,10 @@ Format: simple `key=value` (htoprc-style). Persisted settings include:
 ## Roadmap
 
 - [x] Publish to crates.io (`cargo install pstop`)
-- [ ] Pre-built binaries via GitHub Releases
-- [ ] winget / scoop / chocolatey packages
+- [x] Pre-built binaries via GitHub Releases
+- [x] WinGet (`winget install marlocarlo.pstop`)
+- [x] Chocolatey (`choco install pstop`)
+- [ ] Scoop bucket
 - [ ] GPU monitoring
 - [ ] Network per-process tracking
 - [ ] Custom meter plugins

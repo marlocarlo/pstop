@@ -4,12 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., 0.1.0)'
-        required: true
-        type: string
 
 permissions:
   contents: write
@@ -21,6 +15,9 @@ jobs:
   # ── Build release binaries ──────────────────────────────────────────
   build:
     runs-on: windows-latest
+    outputs:
+      sha256: ${{ steps.checksum.outputs.sha256 }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +33,13 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Extract version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}".TrimStart('v')
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
+
       - name: Build release binaries
         run: cargo build --release
 
@@ -43,11 +47,13 @@ jobs:
         run: cargo test --release
 
       - name: Verify binaries exist
+        shell: pwsh
         run: |
-          Test-Path target/release/pstop.exe
-          Test-Path target/release/htop.exe
+          if (-not (Test-Path target/release/pstop.exe)) { throw "pstop.exe not found" }
+          if (-not (Test-Path target/release/htop.exe)) { throw "htop.exe not found" }
 
       - name: Create release archive
+        shell: pwsh
         run: |
           New-Item -ItemType Directory -Path staging -Force
           Copy-Item target/release/pstop.exe staging/
@@ -58,27 +64,23 @@ jobs:
 
       - name: Compute SHA256 checksum
         id: checksum
+        shell: pwsh
         run: |
           $hash = (Get-FileHash pstop-windows-x86_64.zip -Algorithm SHA256).Hash.ToLower()
           echo "sha256=$hash" >> $env:GITHUB_OUTPUT
-          echo "SHA256: $hash"
+          Write-Host "SHA256: $hash"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-binaries
-          path: |
-            pstop-windows-x86_64.zip
+          path: pstop-windows-x86_64.zip
           retention-days: 5
-
-    outputs:
-      sha256: ${{ steps.checksum.outputs.sha256 }}
 
   # ── Create GitHub Release ───────────────────────────────────────────
   github-release:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
@@ -87,16 +89,12 @@ jobs:
         with:
           name: release-binaries
 
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "pstop v${{ steps.version.outputs.version }}"
+          name: "pstop v${{ needs.build.outputs.version }}"
           body: |
-            ## pstop v${{ steps.version.outputs.version }}
+            ## pstop v${{ needs.build.outputs.version }}
 
             **htop for Windows** — beautiful, fast TUI system monitor.
 
@@ -104,15 +102,18 @@ jobs:
             ```
             cargo install pstop
             ```
-            or
             ```
             choco install pstop
             ```
+            ```
+            winget install marlocarlo.pstop
+            ```
 
-            ### SHA256
-            `${{ needs.build.outputs.sha256 }}`
-          files: |
-            pstop-windows-x86_64.zip
+            ### SHA256 (zip)
+            ```
+            ${{ needs.build.outputs.sha256 }}
+            ```
+          files: pstop-windows-x86_64.zip
           draft: false
           prerelease: false
 
@@ -120,14 +121,27 @@ jobs:
   publish-crates:
     needs: build
     runs-on: windows-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Check if version already published
+        id: check
+        shell: pwsh
+        run: |
+          $version = "${{ needs.build.outputs.version }}"
+          $output = cargo search pstop --limit 1 2>&1 | Out-String
+          if ($output -match "pstop = `"$version`"") {
+            echo "skip=true" >> $env:GITHUB_OUTPUT
+            Write-Host "Version $version already on crates.io — skipping"
+          } else {
+            echo "skip=false" >> $env:GITHUB_OUTPUT
+          }
+
       - name: Publish to crates.io
+        if: steps.check.outputs.skip != 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish --allow-dirty
@@ -136,16 +150,8 @@ jobs:
   publish-choco:
     needs: [build, github-release]
     runs-on: windows-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
-
-      - name: Extract version from tag
-        id: version
-        shell: pwsh
-        run: |
-          $ver = "${{ github.ref_name }}".TrimStart('v')
-          echo "version=$ver" >> $env:GITHUB_OUTPUT
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -161,30 +167,192 @@ jobs:
 
       - name: Prepare Chocolatey package
         shell: pwsh
-        env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
-          DOWNLOAD_URL: "https://github.com/marlocarlo/pstop/releases/download/v${{ steps.version.outputs.version }}/pstop-windows-x86_64.zip"
-          CHECKSUM: ${{ steps.checksum.outputs.sha256 }}
         run: |
-          # Update nuspec version
+          $version = "${{ needs.build.outputs.version }}"
+          $url = "https://github.com/${{ github.repository }}/releases/download/v${version}/pstop-windows-x86_64.zip"
+          $checksum = "${{ steps.checksum.outputs.sha256 }}"
+
+          # Update nuspec version (match any existing version dynamically)
           $nuspec = Get-Content choco/pstop.nuspec -Raw
-          $nuspec = $nuspec -replace '<version>0\.1\.0</version>', "<version>$env:RELEASE_VERSION</version>"
+          $nuspec = $nuspec -replace '<version>[^<]+</version>', "<version>$version</version>"
           Set-Content choco/pstop.nuspec $nuspec
 
           # Update install script with download URL and checksum
           $install = Get-Content choco/tools/chocolateyinstall.ps1 -Raw
-          $install = $install -replace '__DOWNLOAD_URL__', $env:DOWNLOAD_URL
-          $install = $install -replace '__CHECKSUM__', $env:CHECKSUM
+          $install = $install -replace '__DOWNLOAD_URL__', $url
+          $install = $install -replace '__CHECKSUM__', $checksum
           Set-Content choco/tools/chocolateyinstall.ps1 $install
 
       - name: Pack Chocolatey package
+        shell: pwsh
         run: |
           cd choco
           choco pack pstop.nuspec
 
       - name: Push to Chocolatey
+        shell: pwsh
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
+          $version = "${{ needs.build.outputs.version }}"
           cd choco
-          choco push pstop.${{ steps.version.outputs.version }}.nupkg --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY
+          choco push "pstop.${version}.nupkg" --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::warning::Chocolatey push failed (package may already exist or be in moderation)"
+          }
+
+  # ── Publish to WinGet ───────────────────────────────────────────────
+  publish-winget:
+    needs: [build, github-release]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install wingetcreate
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://aka.ms/wingetcreate/latest" -OutFile wingetcreate.exe
+
+      - name: Check for existing open PRs
+        id: check_pr
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_GH_PAT }}
+        run: |
+          $version = "${{ needs.build.outputs.version }}"
+          # Search for open PRs matching this package + version
+          $searchQuery = "repo:microsoft/winget-pkgs is:pr is:open marlocarlo.pstop $version in:title"
+          $result = gh api "search/issues?q=$([uri]::EscapeDataString($searchQuery))&per_page=5" 2>&1 | ConvertFrom-Json
+          if ($result.total_count -gt 0) {
+            echo "skip=true" >> $env:GITHUB_OUTPUT
+            Write-Host "Open PR already exists for marlocarlo.pstop $version — skipping"
+          } else {
+            echo "skip=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Submit to WinGet
+        if: steps.check_pr.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          WINGET_GH_PAT: ${{ secrets.WINGET_GH_PAT }}
+        run: |
+          $version = "${{ needs.build.outputs.version }}"
+          $url = "https://github.com/${{ github.repository }}/releases/download/v${version}/pstop-windows-x86_64.zip"
+
+          Write-Host "Attempting wingetcreate update for marlocarlo.pstop v${version}..."
+          .\wingetcreate.exe update marlocarlo.pstop `
+            --urls $url `
+            --version $version `
+            --submit `
+            --token $env:WINGET_GH_PAT 2>&1
+
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Successfully submitted WinGet update via wingetcreate update"
+            exit 0
+          }
+
+          Write-Host "wingetcreate update failed — package may not exist yet. Creating new manifest..."
+
+          # Download the zip to compute SHA256
+          Invoke-WebRequest -Uri $url -OutFile pstop-release.zip
+          $sha256 = (Get-FileHash pstop-release.zip -Algorithm SHA256).Hash.ToUpper()
+          Write-Host "SHA256: $sha256"
+
+          # Create manifest directory structure
+          $manifestDir = "manifests"
+          New-Item -ItemType Directory -Path $manifestDir -Force
+
+          # --- Version manifest ---
+          @"
+          # yaml-language-server: `$schema=https://aka.ms/winget-manifest.version.1.10.0.schema.json
+          PackageIdentifier: marlocarlo.pstop
+          PackageVersion: $version
+          DefaultLocale: en-US
+          ManifestType: version
+          ManifestVersion: 1.10.0
+          "@ -replace '(?m)^          ', '' | Set-Content "$manifestDir/marlocarlo.pstop.yaml" -NoNewline
+
+          # --- Installer manifest ---
+          @"
+          # yaml-language-server: `$schema=https://aka.ms/winget-manifest.installer.1.10.0.schema.json
+          PackageIdentifier: marlocarlo.pstop
+          PackageVersion: $version
+          MinimumOSVersion: 10.0.17763.0
+          InstallerType: zip
+          NestedInstallerType: portable
+          NestedInstallerFiles:
+            - RelativeFilePath: pstop.exe
+              PortableCommandAlias: pstop
+            - RelativeFilePath: htop.exe
+              PortableCommandAlias: htop
+          Installers:
+            - Architecture: x64
+              InstallerUrl: $url
+              InstallerSha256: $sha256
+              UpgradeBehavior: uninstallPrevious
+          ManifestType: installer
+          ManifestVersion: 1.10.0
+          "@ -replace '(?m)^          ', '' | Set-Content "$manifestDir/marlocarlo.pstop.installer.yaml" -NoNewline
+
+          # --- Default locale manifest ---
+          @"
+          # yaml-language-server: `$schema=https://aka.ms/winget-manifest.defaultLocale.1.10.0.schema.json
+          PackageIdentifier: marlocarlo.pstop
+          PackageVersion: $version
+          PackageLocale: en-US
+          Publisher: marlocarlo
+          PublisherUrl: https://github.com/marlocarlo
+          PublisherSupportUrl: https://github.com/marlocarlo/pstop/issues
+          PackageName: pstop
+          PackageUrl: https://github.com/marlocarlo/pstop
+          License: MIT
+          LicenseUrl: https://github.com/marlocarlo/pstop/blob/main/LICENSE
+          ShortDescription: htop for Windows — beautiful, fast TUI system monitor
+          Description: |-
+            pstop is a full drop-in replacement for htop on Windows. Beautiful TUI system monitor
+            with per-core CPU bars, memory/swap/network monitoring, tree view, process management,
+            search/filter, 7 color schemes, and full mouse support. Installs both pstop and htop commands.
+          Tags:
+            - cli
+            - htop
+            - monitor
+            - process-viewer
+            - rust
+            - system-monitor
+            - terminal
+            - tui
+            - windows
+          ManifestType: defaultLocale
+          ManifestVersion: 1.10.0
+          "@ -replace '(?m)^          ', '' | Set-Content "$manifestDir/marlocarlo.pstop.locale.en-US.yaml" -NoNewline
+
+          Write-Host "=== Generated manifests ==="
+          Get-ChildItem $manifestDir -Filter *.yaml | ForEach-Object {
+            Write-Host "`n--- $($_.Name) ---"
+            Get-Content $_.FullName
+          }
+
+          # Validate manifests with winget if available
+          $wingetAvailable = Get-Command winget -ErrorAction SilentlyContinue
+          if ($wingetAvailable) {
+            Write-Host "`nValidating manifests with winget validate..."
+            winget validate --manifest $manifestDir
+            if ($LASTEXITCODE -ne 0) {
+              throw "winget validate failed — manifest does not conform to schema"
+            }
+            Write-Host "Validation passed"
+          } else {
+            Write-Host "::warning::winget CLI not available on this runner — skipping local validation"
+          }
+
+          # Submit via wingetcreate
+          Write-Host "`nSubmitting manifest to winget-pkgs..."
+          .\wingetcreate.exe submit `
+            --token $env:WINGET_GH_PAT `
+            --prtitle "New package: marlocarlo.pstop version $version" `
+            $manifestDir
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "wingetcreate submit failed"
+          }
+          Write-Host "Successfully submitted new WinGet package"

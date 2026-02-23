@@ -3,9 +3,13 @@
 //! - Per-process thread count
 //! - Shared working set memory (estimated)
 //! - Open handles/files enumeration
+//! - Real boot time (via Event Log, accounts for Fast Startup)
 
 use std::collections::HashMap;
 use std::mem;
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use windows::Win32::Foundation::{CloseHandle, MAX_PATH, HMODULE, HANDLE};
 use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -372,6 +376,57 @@ fn get_process_user(pid: u32) -> Option<String> {
             None
         }
     }
+}
+
+/// Get the real system boot time that correctly accounts for Windows Fast Startup.
+///
+/// `sysinfo::System::uptime()` uses `GetTickCount64()` which does NOT reset when
+/// Fast Startup is enabled (the default on Windows 10/11). Fast Startup hibernates
+/// the kernel instead of fully shutting down, so the tick counter persists across
+/// "shutdown" + power-on cycles.
+///
+/// This function queries the Windows Event Log for the most recent Kernel-Boot event
+/// (Event ID 27 on Windows 10, Event ID 18 on Windows 11) to determine the actual
+/// boot time, including Fast Startup resumes.
+///
+/// Returns the boot time as a Unix timestamp (seconds since epoch), or None on failure.
+pub fn get_real_boot_time() -> Option<i64> {
+    // Query the most recent boot event from Microsoft-Windows-Kernel-Boot.
+    // Event ID 27 (Win10) and 18 (Win11) record the boot type:
+    //   0x0 = full shutdown / reboot
+    //   0x1 = shutdown with Fast Startup
+    //   0x2 = resume from hibernation
+    // The event timestamp is the actual boot time regardless of Fast Startup.
+    let output = std::process::Command::new("wevtutil")
+        .args([
+            "qe", "System",
+            "/q:*[System[Provider[@Name='Microsoft-Windows-Kernel-Boot'] and (EventID=27 or EventID=18)]]",
+            "/c:1", "/rd:true", "/f:xml",
+        ])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW: prevent console flash
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let xml = String::from_utf8_lossy(&output.stdout);
+    parse_event_system_time(&xml)
+}
+
+/// Parse the SystemTime attribute from wevtutil XML output.
+/// Example: `<TimeCreated SystemTime='2024-01-15T08:30:00.1234567Z'/>`
+fn parse_event_system_time(xml: &str) -> Option<i64> {
+    let marker = "SystemTime='";
+    let start = xml.find(marker)? + marker.len();
+    let rest = &xml[start..];
+    let end = rest.find('\'')?;
+    let time_str = &rest[..end];
+
+    chrono::DateTime::parse_from_rfc3339(time_str)
+        .ok()
+        .map(|dt| dt.timestamp())
 }
 
 /// Handle information for display in lsof-style viewer

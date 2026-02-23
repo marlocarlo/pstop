@@ -28,6 +28,10 @@ pub struct Collector {
     load_samples_1: f64,
     load_samples_5: f64,
     load_samples_15: f64,
+    /// Real boot time (Unix timestamp) from Windows Event Log.
+    /// Accounts for Fast Startup, which causes GetTickCount64() to report
+    /// inflated uptime because the kernel hibernates instead of rebooting.
+    boot_time_unix: Option<i64>,
 }
 
 impl Collector {
@@ -43,6 +47,9 @@ impl Collector {
 
         let networks = Networks::new_with_refreshed_list();
 
+        // Query real boot time from Event Log (handles Fast Startup correctly)
+        let boot_time_unix = winapi::get_real_boot_time();
+
         Self {
             sys,
             networks,
@@ -56,6 +63,7 @@ impl Collector {
             load_samples_1: 0.0,
             load_samples_5: 0.0,
             load_samples_15: 0.0,
+            boot_time_unix,
         }
     }
 
@@ -183,7 +191,7 @@ impl Collector {
 
     fn collect_processes(&mut self, app: &mut App) {
         let total_mem = self.sys.total_memory();
-        let uptime = System::uptime();
+        let uptime = self.real_uptime();
         let mut running = 0usize;
         let mut sleeping = 0usize;
         let mut total_threads = 0usize;
@@ -316,8 +324,20 @@ impl Collector {
         app.processes = processes;
     }
 
+    /// Calculate system uptime, using the real boot time from the Event Log
+    /// when available (correctly handles Fast Startup), falling back to
+    /// sysinfo's GetTickCount64-based uptime otherwise.
+    fn real_uptime(&self) -> u64 {
+        if let Some(boot_time) = self.boot_time_unix {
+            let now = chrono::Utc::now().timestamp();
+            (now - boot_time).max(0) as u64
+        } else {
+            System::uptime()
+        }
+    }
+
     fn collect_uptime(&self, app: &mut App) {
-        app.uptime_seconds = System::uptime();
+        app.uptime_seconds = self.real_uptime();
     }
 
     /// Approximate load averages using exponential moving average of CPU usage.

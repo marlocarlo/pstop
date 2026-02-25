@@ -9,7 +9,7 @@ use crate::system::memory::MemoryInfo;
 use crate::system::network::NetworkInfo;
 use crate::system::process::{ProcessInfo, ProcessStatus};
 use crate::system::winapi;
-use crate::system::netstat::NetBandwidthTracker;
+use crate::system::netstat;
 
 /// System data collector using the `sysinfo` crate, with Windows user resolution
 pub struct Collector {
@@ -41,8 +41,6 @@ pub struct Collector {
     pub cpu_kernel_frac: f64,
     /// GPU collector (persistent PDH query)
     gpu_collector: GpuCollector,
-    /// Per-process network bandwidth tracker
-    net_tracker: NetBandwidthTracker,
 }
 
 impl Collector {
@@ -79,7 +77,6 @@ impl Collector {
             cpu_user_frac: 0.7,
             cpu_kernel_frac: 0.3,
             gpu_collector: GpuCollector::new(),
-            net_tracker: NetBandwidthTracker::new(),
         }
     }
 
@@ -123,11 +120,39 @@ impl Collector {
         // ── Network bandwidth (Net tab) ──
         // Only collect when on the Net tab (avoid overhead otherwise)
         if matches!(app.active_tab, crate::app::ProcessTab::Net) {
-            let pid_names: HashMap<u32, String> = app.processes.iter()
-                .map(|p| (p.pid, p.name.clone()))
+            let conn_counts = netstat::count_connections_per_pid();
+
+            // Build ProcessNetBandwidth by matching connection PIDs to process I/O rates
+            let mut net_procs: Vec<netstat::ProcessNetBandwidth> = conn_counts
+                .into_iter()
+                .map(|(pid, count)| {
+                    let (name, recv, send) = app.processes.iter()
+                        .find(|p| p.pid == pid)
+                        .map(|p| (p.name.clone(), p.io_read_rate, p.io_write_rate))
+                        .unwrap_or_else(|| {
+                            let name = if pid == 4 { "System".to_string() } else { format!("PID:{}", pid) };
+                            (name, 0.0, 0.0)
+                        });
+                    netstat::ProcessNetBandwidth {
+                        pid,
+                        name,
+                        recv_bytes_per_sec: recv,
+                        send_bytes_per_sec: send,
+                        connection_count: count,
+                    }
+                })
                 .collect();
-            app.net_processes = self.net_tracker.collect(&pid_names);
-            app.net_admin = self.net_tracker.has_bandwidth_data();
+
+            // Sort: highest total bandwidth first, then by connection count
+            net_procs.sort_by(|a, b| {
+                let ar = a.recv_bytes_per_sec + a.send_bytes_per_sec;
+                let br = b.recv_bytes_per_sec + b.send_bytes_per_sec;
+                br.partial_cmp(&ar)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| b.connection_count.cmp(&a.connection_count))
+            });
+
+            app.net_processes = net_procs;
         }
 
         // ── GPU per-process data (GPU tab) ──

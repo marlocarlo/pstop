@@ -52,7 +52,6 @@ pub struct App {
 
     // Network bandwidth per process (Net tab)
     pub net_processes: Vec<ProcessNetBandwidth>,
-    pub net_admin: bool,           // whether EStats bandwidth data is available (admin)
     pub net_selected_index: usize,
     pub net_scroll_offset: usize,
 
@@ -191,7 +190,6 @@ impl App {
             filtered_processes: Vec::new(),
 
             net_processes: Vec::new(),
-            net_admin: false,
             net_selected_index: 0,
             net_scroll_offset: 0,
 

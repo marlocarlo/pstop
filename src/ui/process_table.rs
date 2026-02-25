@@ -549,27 +549,11 @@ fn build_net_bandwidth_row(
     let base_style = Style::default().bg(bg);
     let default_fg = if selected { cs.process_selected_fg } else { cs.process_fg };
 
-    let dl_str = if app.net_admin {
-        format_bandwidth(proc_net.recv_bytes_per_sec)
-    } else {
-        "\u{2014}".to_string()  // em-dash when no admin
-    };
-    let ul_str = if app.net_admin {
-        format_bandwidth(proc_net.send_bytes_per_sec)
-    } else {
-        "\u{2014}".to_string()
-    };
+    let dl_str = format_bandwidth(proc_net.recv_bytes_per_sec);
+    let ul_str = format_bandwidth(proc_net.send_bytes_per_sec);
 
-    let dl_color = if app.net_admin {
-        bandwidth_color(proc_net.recv_bytes_per_sec)
-    } else {
-        Color::DarkGray
-    };
-    let ul_color = if app.net_admin {
-        bandwidth_color(proc_net.send_bytes_per_sec)
-    } else {
-        Color::DarkGray
-    };
+    let dl_color = bandwidth_color(proc_net.recv_bytes_per_sec);
+    let ul_color = bandwidth_color(proc_net.send_bytes_per_sec);
 
     // Fixed: PID(7) + Process(15) + Download(12) + Upload(12) = 46
     let conn_width = width.saturating_sub(46);

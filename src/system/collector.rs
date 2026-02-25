@@ -9,7 +9,7 @@ use crate::system::memory::MemoryInfo;
 use crate::system::network::NetworkInfo;
 use crate::system::process::{ProcessInfo, ProcessStatus};
 use crate::system::winapi;
-use crate::system::netstat;
+use crate::system::netstat::NetBandwidthTracker;
 
 /// System data collector using the `sysinfo` crate, with Windows user resolution
 pub struct Collector {
@@ -41,6 +41,8 @@ pub struct Collector {
     pub cpu_kernel_frac: f64,
     /// GPU collector (persistent PDH query)
     gpu_collector: GpuCollector,
+    /// Per-process network bandwidth tracker
+    net_tracker: NetBandwidthTracker,
 }
 
 impl Collector {
@@ -77,6 +79,7 @@ impl Collector {
             cpu_user_frac: 0.7,
             cpu_kernel_frac: 0.3,
             gpu_collector: GpuCollector::new(),
+            net_tracker: NetBandwidthTracker::new(),
         }
     }
 
@@ -117,13 +120,14 @@ impl Collector {
             app.build_tree_view();
         }
 
-        // ── Network connections (Net tab) ──
+        // ── Network bandwidth (Net tab) ──
         // Only collect when on the Net tab (avoid overhead otherwise)
         if matches!(app.active_tab, crate::app::ProcessTab::Net) {
             let pid_names: HashMap<u32, String> = app.processes.iter()
                 .map(|p| (p.pid, p.name.clone()))
                 .collect();
-            app.connections = netstat::fetch_connections(&pid_names);
+            app.net_processes = self.net_tracker.collect(&pid_names);
+            app.net_admin = self.net_tracker.has_bandwidth_data();
         }
 
         // ── GPU per-process data (GPU tab) ──

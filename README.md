@@ -139,7 +139,7 @@ Press `F5` or `t` to toggle process tree view — see parent-child relationships
 ### 📋 Four Tab Views
 - **Main** - Full process table (PID, USER, CPU%, MEM%, TIME+, Command...)
 - **I/O** - Disk read/write rates per process
-- **Net** - Real network connections per process (TCP/UDP, local & remote addresses, state) via Windows `GetExtendedTcpTable` / `GetExtendedUdpTable` APIs
+- **Net** - Per-process network bandwidth (live download/upload rates with auto-scaling B/s, KB/s, MB/s, GB/s) plus active connection counts via `GetPerTcpConnectionEStats`. Admin recommended for bandwidth data.
 - **GPU** - Per-process GPU engine utilization and dedicated/shared video memory usage via PDH performance counters
 
 ### ⚙️ F2 Setup Menu (Full htop Parity)
@@ -264,7 +264,7 @@ Format: simple `key=value` (htoprc-style). Persisted settings include:
 - [x] WinGet (`winget install marlocarlo.pstop`)
 - [x] Chocolatey (`choco install pstop`)
 - [x] GPU monitoring (per-process GPU engine usage + VRAM, header GPU/VMem bars)
-- [x] Network per-process tracking (real TCP/UDP connections via OS APIs)
+- [x] Network per-process tracking (live bandwidth via GetPerTcpConnectionEStats)
 - [x] Auto-adjusting CPU column layout (2/4/8/16 columns based on core count)
 - [x] Independent htop-style header panel flow (no forced alignment)
 - [ ] Scoop bucket

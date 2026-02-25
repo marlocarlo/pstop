@@ -4,7 +4,7 @@ use crate::color_scheme::{ColorScheme, ColorSchemeId};
 use crate::system::cpu::CpuInfo;
 use crate::system::gpu::GpuProcessInfo;
 use crate::system::memory::MemoryInfo;
-use crate::system::netstat::NetConnection;
+use crate::system::netstat::ProcessNetBandwidth;
 use crate::system::network::NetworkInfo;
 use crate::system::process::{ProcessInfo, ProcessSortField};
 
@@ -50,8 +50,9 @@ pub struct App {
     pub processes: Vec<ProcessInfo>,
     pub filtered_processes: Vec<ProcessInfo>,
 
-    // Network connections (Net tab)
-    pub connections: Vec<NetConnection>,
+    // Network bandwidth per process (Net tab)
+    pub net_processes: Vec<ProcessNetBandwidth>,
+    pub net_admin: bool,           // whether EStats bandwidth data is available (admin)
     pub net_selected_index: usize,
     pub net_scroll_offset: usize,
 
@@ -189,7 +190,8 @@ impl App {
             processes: Vec::new(),
             filtered_processes: Vec::new(),
 
-            connections: Vec::new(),
+            net_processes: Vec::new(),
+            net_admin: false,
             net_selected_index: 0,
             net_scroll_offset: 0,
 
@@ -607,7 +609,7 @@ impl App {
     fn active_list_len(&self) -> usize {
         match self.active_tab {
             ProcessTab::Main | ProcessTab::Io => self.filtered_processes.len(),
-            ProcessTab::Net => self.connections.len(),
+            ProcessTab::Net => self.net_processes.len(),
             ProcessTab::Gpu => self.gpu_processes.len(),
         }
     }
@@ -719,11 +721,11 @@ impl App {
             self.selected_index = self.filtered_processes.len() - 1;
         }
         // Clamp Net tab selection
-        if self.connections.is_empty() {
+        if self.net_processes.is_empty() {
             self.net_selected_index = 0;
             self.net_scroll_offset = 0;
-        } else if self.net_selected_index >= self.connections.len() {
-            self.net_selected_index = self.connections.len() - 1;
+        } else if self.net_selected_index >= self.net_processes.len() {
+            self.net_selected_index = self.net_processes.len() - 1;
         }
         // Clamp GPU tab selection
         if self.gpu_processes.is_empty() {

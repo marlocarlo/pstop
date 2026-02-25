@@ -45,17 +45,14 @@ pub const IO_HEADERS: &[(&str, u16, ProcessSortField, u8)] = &[
     ("Command",     0,  ProcessSortField::Command,     100),
 ];
 
-/// Network connections tab column headers (Net tab - real connections)
-/// These use ProcessSortField::Pid as a placeholder since connections aren't process-sorted.
-/// The Net tab has its own rendering path.
+/// Network bandwidth tab column headers (Net tab - per-process bandwidth)
+/// Shows live download/upload rates aggregated per process.
 pub const NET_HEADERS: &[(&str, u16, ProcessSortField, u8)] = &[
-    ("PID",       7,  ProcessSortField::Pid,         90),
-    ("Process",  15,  ProcessSortField::Command,    100),
-    ("Proto",     6,  ProcessSortField::Status,      80),
-    ("Local",    22,  ProcessSortField::User,        85),
-    ("Remote",   22,  ProcessSortField::Priority,    70),
-    ("State",    12,  ProcessSortField::Nice,        75),
-    ("Service",   0,  ProcessSortField::VirtMem,     60),
+    ("PID",          7,  ProcessSortField::Pid,         90),
+    ("Process",     15,  ProcessSortField::Command,    100),
+    ("Download",    12,  ProcessSortField::IoReadRate,   95),
+    ("Upload",      12,  ProcessSortField::IoWriteRate,  85),
+    ("Connections",  0,  ProcessSortField::Nice,         70),
 ];
 
 /// GPU tab column headers (per-process GPU usage)
@@ -204,10 +201,10 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
 
         ProcessTab::Net => {
             let start = app.net_scroll_offset;
-            let end = (start + visible).min(app.connections.len());
+            let end = (start + visible).min(app.net_processes.len());
 
             for (i, row_idx) in (start..end).enumerate() {
-                let conn = &app.connections[row_idx];
+                let proc_net = &app.net_processes[row_idx];
                 let is_selected = row_idx == app.net_selected_index;
 
                 let row_area = Rect {
@@ -217,12 +214,11 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
                     height: 1,
                 };
 
-                let row_line = build_net_conn_row(conn, row_area.width as usize, app, is_selected);
+                let row_line = build_net_bandwidth_row(proc_net, row_area.width as usize, app, is_selected);
                 f.render_widget(Paragraph::new(row_line), row_area);
             }
 
-            // If no connections, show a message
-            if app.connections.is_empty() {
+            if app.net_processes.is_empty() {
                 let msg_area = Rect {
                     x: proc_area.x,
                     y: proc_area.y,
@@ -230,7 +226,7 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
                     height: 1,
                 };
                 let msg = Line::from(Span::styled(
-                    "  No active network connections found (run as administrator for full view)",
+                    "  No processes with active network connections found",
                     Style::default().fg(Color::DarkGray),
                 ));
                 f.render_widget(Paragraph::new(msg), msg_area);
@@ -540,10 +536,10 @@ fn build_process_row(
     Line::from(spans)
 }
 
-/// Build a row for the Net tab (real network connections)
-/// PID  Process  Proto  Local  Remote  State  Service
-fn build_net_conn_row(
-    conn: &crate::system::netstat::NetConnection,
+/// Build a row for the Net tab (per-process bandwidth)
+/// PID  Process  Download  Upload  Connections
+fn build_net_bandwidth_row(
+    proc_net: &crate::system::netstat::ProcessNetBandwidth,
     width: usize,
     app: &App,
     selected: bool,
@@ -553,47 +549,73 @@ fn build_net_conn_row(
     let base_style = Style::default().bg(bg);
     let default_fg = if selected { cs.process_selected_fg } else { cs.process_fg };
 
-    // State-based color
-    let state_fg = match conn.state {
-        Some(crate::system::netstat::TcpState::Established) => Color::Green,
-        Some(crate::system::netstat::TcpState::Listen) => Color::Cyan,
-        Some(crate::system::netstat::TcpState::TimeWait) | Some(crate::system::netstat::TcpState::CloseWait) => Color::Yellow,
-        Some(crate::system::netstat::TcpState::SynSent) | Some(crate::system::netstat::TcpState::SynReceived) => Color::Magenta,
-        None => Color::DarkGray, // UDP has no state
-        _ => default_fg,
-    };
-
-    let proto_fg = match conn.proto {
-        crate::system::netstat::ConnProto::Tcp => Color::Cyan,
-        crate::system::netstat::ConnProto::Udp => Color::Yellow,
-    };
-
-    // Proto label with version
-    let is_v6 = conn.local_addr.is_ipv6();
-    let proto_str = format!("{}{}", conn.proto.label(), if is_v6 { "6" } else { "4" });
-
-    let local_str = conn.local_str();
-    let remote_str = conn.remote_str();
-    let state_str: &str = if let Some(s) = conn.state {
-        s.label()
+    let dl_str = if app.net_admin {
+        format_bandwidth(proc_net.recv_bytes_per_sec)
     } else {
-        "---"
+        "\u{2014}".to_string()  // em-dash when no admin
     };
-    let service = conn.service_label();
+    let ul_str = if app.net_admin {
+        format_bandwidth(proc_net.send_bytes_per_sec)
+    } else {
+        "\u{2014}".to_string()
+    };
 
-    // Fixed columns: PID(7) + Process(15) + Proto(6) + Local(22) + Remote(22) + State(12) = 84
-    let service_width = width.saturating_sub(84);
+    let dl_color = if app.net_admin {
+        bandwidth_color(proc_net.recv_bytes_per_sec)
+    } else {
+        Color::DarkGray
+    };
+    let ul_color = if app.net_admin {
+        bandwidth_color(proc_net.send_bytes_per_sec)
+    } else {
+        Color::DarkGray
+    };
+
+    // Fixed: PID(7) + Process(15) + Download(12) + Upload(12) = 46
+    let conn_width = width.saturating_sub(46);
 
     let mut spans = Vec::new();
-    spans.push(Span::styled(format!("{:>6} ", conn.pid), base_style.fg(cs.col_pid)));
-    spans.push(Span::styled(format!("{:<14} ", truncate_str(&conn.process_name, 14)), base_style.fg(cs.col_command_basename).add_modifier(Modifier::BOLD)));
-    spans.push(Span::styled(format!("{:<5} ", proto_str), base_style.fg(proto_fg)));
-    spans.push(Span::styled(format!("{:<21} ", truncate_str(&local_str, 21)), base_style.fg(default_fg)));
-    spans.push(Span::styled(format!("{:<21} ", truncate_str(&remote_str, 21)), base_style.fg(default_fg)));
-    spans.push(Span::styled(format!("{:<11} ", state_str), base_style.fg(state_fg)));
-    spans.push(Span::styled(format!("{:<width$}", service, width = service_width), base_style.fg(Color::DarkGray)));
+    spans.push(Span::styled(format!("{:>6} ", proc_net.pid), base_style.fg(cs.col_pid)));
+    spans.push(Span::styled(
+        format!("{:<14} ", truncate_str(&proc_net.name, 14)),
+        base_style.fg(cs.col_command_basename).add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::styled(format!("{:>11} ", dl_str), base_style.fg(dl_color)));
+    spans.push(Span::styled(format!("{:>11} ", ul_str), base_style.fg(ul_color)));
+    spans.push(Span::styled(
+        format!("{:<width$}", proc_net.connection_count, width = conn_width),
+        base_style.fg(default_fg),
+    ));
 
     Line::from(spans)
+}
+
+/// Format bytes/sec as human-readable bandwidth with auto-scaling units
+fn format_bandwidth(bytes_per_sec: f64) -> String {
+    if bytes_per_sec >= 1_073_741_824.0 {
+        format!("{:.1} GB/s", bytes_per_sec / 1_073_741_824.0)
+    } else if bytes_per_sec >= 1_048_576.0 {
+        format!("{:.1} MB/s", bytes_per_sec / 1_048_576.0)
+    } else if bytes_per_sec >= 1024.0 {
+        format!("{:.1} KB/s", bytes_per_sec / 1024.0)
+    } else if bytes_per_sec >= 1.0 {
+        format!("{:.0} B/s", bytes_per_sec)
+    } else {
+        "0 B/s".to_string()
+    }
+}
+
+/// Color code bandwidth values: gray(idle) → green(low) → yellow(medium) → red(high)
+fn bandwidth_color(bytes_per_sec: f64) -> Color {
+    if bytes_per_sec >= 10_485_760.0 {      // > 10 MB/s
+        Color::Red
+    } else if bytes_per_sec >= 1_048_576.0 { // > 1 MB/s
+        Color::Yellow
+    } else if bytes_per_sec >= 1024.0 {      // > 1 KB/s
+        Color::Green
+    } else {
+        Color::DarkGray
+    }
 }
 
 /// Build a row for the GPU tab (per-process GPU usage)

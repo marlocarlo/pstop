@@ -3,6 +3,7 @@ use crossterm::event::{MouseEvent, MouseEventKind, MouseButton};
 use crate::app::{App, AppMode, ProcessTab};
 use crate::system::process::ProcessSortField;
 use crate::ui;
+use crate::ui::process_table::{HEADERS, IO_HEADERS, NET_HEADERS, compute_display_columns};
 
 /// Handle a mouse event.
 /// Requires the terminal size (columns, rows) to compute layout areas.
@@ -68,62 +69,25 @@ fn handle_tab_bar_click(app: &mut App, x: u16) {
 
 // ── Header click (sort by column) ───────────────────────────────────
 
-/// htop's exact default column headers and widths (mirrors process_table.rs)
-const HEADERS: &[(&str, u16, ProcessSortField)] = &[
-    ("PID",     7,  ProcessSortField::Pid),
-    ("PPID",    7,  ProcessSortField::Ppid),
-    ("USER",    9,  ProcessSortField::User),
-    ("PRI",     4,  ProcessSortField::Priority),
-    ("NI",      4,  ProcessSortField::Nice),
-    ("VIRT",    7,  ProcessSortField::VirtMem),
-    ("RES",     7,  ProcessSortField::ResMem),
-    ("SHR",     7,  ProcessSortField::SharedMem),
-    ("S",       2,  ProcessSortField::Status),
-    ("CPU%",    6,  ProcessSortField::Cpu),
-    ("MEM%",    6,  ProcessSortField::Mem),
-    ("TIME+",  10,  ProcessSortField::Time),
-    ("THR",     4,  ProcessSortField::Threads),
-    ("IO_R",   10,  ProcessSortField::IoReadRate),
-    ("IO_W",   10,  ProcessSortField::IoWriteRate),
-    ("Command", 0,  ProcessSortField::Command),
-];
-
-const IO_HEADERS: &[(&str, u16, ProcessSortField)] = &[
-    ("PID",         7,  ProcessSortField::Pid),
-    ("USER",        9,  ProcessSortField::User),
-    ("IO",          4,  ProcessSortField::Priority),
-    ("DISK R/Mv",  10,  ProcessSortField::IoRate),
-    ("DISK READ",  10,  ProcessSortField::IoReadRate),
-    ("DISK WRITE", 11,  ProcessSortField::IoWriteRate),
-    ("SWPD%",       6,  ProcessSortField::Mem),
-    ("IOD%",        6,  ProcessSortField::Cpu),
-    ("Command",     0,  ProcessSortField::Command),
-];
-
-const NET_HEADERS: &[(&str, u16, ProcessSortField)] = &[
-    ("PID",        7,  ProcessSortField::Pid),
-    ("USER",       9,  ProcessSortField::User),
-    ("S",          2,  ProcessSortField::Status),
-    ("CPU%",       6,  ProcessSortField::Cpu),
-    ("IO READ",   10,  ProcessSortField::IoReadRate),
-    ("IO WRITE",  10,  ProcessSortField::IoWriteRate),
-    ("TOTAL IO",  10,  ProcessSortField::IoRate),
-    ("MEM%",       6,  ProcessSortField::Mem),
-    ("Command",    0,  ProcessSortField::Command),
-];
-
 fn handle_header_click(app: &mut App, x: u16, term_width: u16) {
-    let headers: &[(&str, u16, ProcessSortField)] = match app.active_tab {
+    let headers = match app.active_tab {
         ProcessTab::Main => HEADERS,
         ProcessTab::Io   => IO_HEADERS,
         ProcessTab::Net  => NET_HEADERS,
     };
 
-    // Compute column boundaries, respecting visibility (Main tab only)
+    // Compute display columns (same logic as rendering, so clicks match)
+    let base_visible: std::collections::HashSet<ProcessSortField> = match app.active_tab {
+        ProcessTab::Main => app.visible_columns.clone(),
+        _ => headers.iter().map(|(_, _, f, _)| *f).collect(),
+    };
+    let display_cols = compute_display_columns(headers, &base_visible, term_width, app.sort_field);
+
+    // Compute column boundaries, respecting auto-hidden columns
     let mut cursor: u16 = 0;
-    for &(_, width, field) in headers {
-        // On Main tab, skip hidden columns
-        if app.active_tab == ProcessTab::Main && !app.visible_columns.contains(&field) {
+    for &(_, width, field, _) in headers {
+        // Skip columns not in the display set
+        if !display_cols.contains(&field) {
             continue;
         }
 

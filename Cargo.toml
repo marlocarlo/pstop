@@ -1,6 +1,6 @@
 [package]
 name = "pstop"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "htop for Windows — beautiful, fast TUI system monitor with per-core CPU bars, memory/swap/network, tree view, process management, 7 color schemes, mouse support. Drop-in htop replacement for PowerShell & Windows Terminal."
 license = "MIT"

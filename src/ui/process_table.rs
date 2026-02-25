@@ -11,51 +11,52 @@ use crate::system::process::ProcessSortField;
 /// htop's exact default column headers and widths:
 /// PID USER PRI NI VIRT RES SHR S CPU% MEM% TIME+ Command
 /// Note: I/O columns are shown when available (optional in htop via F2 setup)
-const HEADERS: &[(&str, u16, ProcessSortField)] = &[
-    ("PID",        7,  ProcessSortField::Pid),
-    ("PPID",       7,  ProcessSortField::Ppid),
-    ("USER",       9,  ProcessSortField::User),
-    ("PRI",        4,  ProcessSortField::Priority),
-    ("NI",         4,  ProcessSortField::Nice),
-    ("VIRT",       7,  ProcessSortField::VirtMem),
-    ("RES",        7,  ProcessSortField::ResMem),
-    ("SHR",        7,  ProcessSortField::SharedMem),
-    ("S",          2,  ProcessSortField::Status),
-    ("CPU%",       6,  ProcessSortField::Cpu),
-    ("MEM%",       6,  ProcessSortField::Mem),
-    ("TIME+",     10,  ProcessSortField::Time),
-    ("THR",        4,  ProcessSortField::Threads),
-    ("IO_R",      10,  ProcessSortField::IoReadRate),   // htop: DISK READ
-    ("IO_W",      10,  ProcessSortField::IoWriteRate),  // htop: DISK WRITE
-    ("Command",    0,  ProcessSortField::Command), // 0 = takes remaining space
+/// 4th element = display priority (higher = more important, hidden last on narrow terminals)
+pub const HEADERS: &[(&str, u16, ProcessSortField, u8)] = &[
+    ("PID",        7,  ProcessSortField::Pid,         90),
+    ("PPID",       7,  ProcessSortField::Ppid,        15),
+    ("USER",       9,  ProcessSortField::User,        80),
+    ("PRI",        4,  ProcessSortField::Priority,    20),
+    ("NI",         4,  ProcessSortField::Nice,        15),
+    ("VIRT",       7,  ProcessSortField::VirtMem,     30),
+    ("RES",        7,  ProcessSortField::ResMem,      55),
+    ("SHR",        7,  ProcessSortField::SharedMem,   25),
+    ("S",          2,  ProcessSortField::Status,      45),
+    ("CPU%",       6,  ProcessSortField::Cpu,         95),
+    ("MEM%",       6,  ProcessSortField::Mem,         85),
+    ("TIME+",     10,  ProcessSortField::Time,        50),
+    ("THR",        4,  ProcessSortField::Threads,     25),
+    ("IO_R",      10,  ProcessSortField::IoReadRate,  10),
+    ("IO_W",      10,  ProcessSortField::IoWriteRate,  8),
+    ("Command",    0,  ProcessSortField::Command,    100), // 0 = takes remaining space
 ];
 
 /// htop I/O tab column headers
 /// PID USER IO DISK R/W DISK READ DISK WRITE SWPD% IOD% Command
-const IO_HEADERS: &[(&str, u16, ProcessSortField)] = &[
-    ("PID",         7,  ProcessSortField::Pid),
-    ("USER",        9,  ProcessSortField::User),
-    ("IO",          4,  ProcessSortField::Priority),    // I/O priority (maps from process priority)
-    ("DISK R/Mv",  10,  ProcessSortField::IoRate),      // Combined read+write
-    ("DISK READ",  10,  ProcessSortField::IoReadRate),
-    ("DISK WRITE", 11,  ProcessSortField::IoWriteRate),
-    ("SWPD%",       6,  ProcessSortField::Mem),         // Swap percentage approximation
-    ("IOD%",        6,  ProcessSortField::Cpu),         // I/O delay (approximated)
-    ("Command",     0,  ProcessSortField::Command),
+pub const IO_HEADERS: &[(&str, u16, ProcessSortField, u8)] = &[
+    ("PID",         7,  ProcessSortField::Pid,          90),
+    ("USER",        9,  ProcessSortField::User,         80),
+    ("IO",          4,  ProcessSortField::Priority,     50),
+    ("DISK R/Mv",  10,  ProcessSortField::IoRate,       85),
+    ("DISK READ",  10,  ProcessSortField::IoReadRate,   70),
+    ("DISK WRITE", 11,  ProcessSortField::IoWriteRate,  65),
+    ("SWPD%",       6,  ProcessSortField::Mem,          20),
+    ("IOD%",        6,  ProcessSortField::Cpu,          15),
+    ("Command",     0,  ProcessSortField::Command,     100),
 ];
 
 /// Network tab column headers (pstop extension)
 /// PID USER  S  CPU%  IO_READ  IO_WRITE  TOTAL_IO  Command
-const NET_HEADERS: &[(&str, u16, ProcessSortField)] = &[
-    ("PID",        7,  ProcessSortField::Pid),
-    ("USER",       9,  ProcessSortField::User),
-    ("S",          2,  ProcessSortField::Status),
-    ("CPU%",       6,  ProcessSortField::Cpu),
-    ("IO READ",   10,  ProcessSortField::IoReadRate),
-    ("IO WRITE",  10,  ProcessSortField::IoWriteRate),
-    ("TOTAL IO",  10,  ProcessSortField::IoRate),
-    ("MEM%",       6,  ProcessSortField::Mem),
-    ("Command",    0,  ProcessSortField::Command),
+pub const NET_HEADERS: &[(&str, u16, ProcessSortField, u8)] = &[
+    ("PID",        7,  ProcessSortField::Pid,          90),
+    ("USER",       9,  ProcessSortField::User,         80),
+    ("S",          2,  ProcessSortField::Status,       40),
+    ("CPU%",       6,  ProcessSortField::Cpu,          85),
+    ("IO READ",   10,  ProcessSortField::IoReadRate,   70),
+    ("IO WRITE",  10,  ProcessSortField::IoWriteRate,  65),
+    ("TOTAL IO",  10,  ProcessSortField::IoRate,       75),
+    ("MEM%",       6,  ProcessSortField::Mem,          60),
+    ("Command",    0,  ProcessSortField::Command,     100),
 ];
 
 /// Draw the process table
@@ -82,20 +83,23 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
         header_area,
     );
 
+    // Compute which columns to display (user-visible ∩ auto-hide by width priority)
+    let base_visible: std::collections::HashSet<ProcessSortField> = match app.active_tab {
+        ProcessTab::Main => app.visible_columns.clone(),
+        _ => headers.iter().map(|(_, _, f, _)| *f).collect(),
+    };
+    let display_cols = compute_display_columns(headers, &base_visible, area.width, app.sort_field);
+
     // Build header spans with sort indicator
     let mut header_spans: Vec<Span> = Vec::new();
-    for (name, width, sort_field) in headers {
-        // On Main tab, skip columns that are not visible (F2 setup menu)
-        if app.active_tab == ProcessTab::Main && !app.visible_columns.contains(sort_field) {
+    for (name, width, sort_field, _prio) in headers {
+        // Skip columns not in the computed display set
+        if !display_cols.contains(sort_field) {
             continue;
         }
         
         let is_sorted = *sort_field == app.sort_field;
-        let fixed_w = match app.active_tab {
-            ProcessTab::Main => fixed_cols_width_visible(app),
-            ProcessTab::Io => io_fixed_cols_width(),
-            ProcessTab::Net => net_fixed_cols_width(),
-        };
+        let fixed_w = fixed_cols_width_for(headers, &display_cols);
         let w = if *width == 0 { (area.width as usize).saturating_sub(fixed_w) } else { *width as usize };
 
         let display = if is_sorted {
@@ -175,9 +179,9 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
         };
 
         let row_line = match app.active_tab {
-            ProcessTab::Main => build_process_row(proc, row_area.width as usize, app, is_selected, is_tagged),
-            ProcessTab::Io => build_io_row(proc, row_area.width as usize, app, is_selected, is_tagged),
-            ProcessTab::Net => build_net_row(proc, row_area.width as usize, app, is_selected, is_tagged),
+            ProcessTab::Main => build_process_row(proc, row_area.width as usize, app, is_selected, is_tagged, &display_cols),
+            ProcessTab::Io => build_io_row(proc, row_area.width as usize, app, is_selected, is_tagged, &display_cols),
+            ProcessTab::Net => build_net_row(proc, row_area.width as usize, app, is_selected, is_tagged, &display_cols),
         };
         f.render_widget(Paragraph::new(row_line), row_area);
     }
@@ -210,27 +214,65 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// Total width of all fixed-width columns (for calculating Command column)
-fn fixed_cols_width() -> usize {
-    HEADERS.iter().map(|(_, w, _)| if *w > 0 { *w as usize + 1 } else { 0 }).sum()
+/// Minimum width reserved for the Command column before auto-hiding other columns.
+/// When the terminal is too narrow, low-priority columns are hidden progressively
+/// (like htop) to ensure Command, CPU%, MEM%, USER, PID remain visible.
+const MIN_COMMAND_WIDTH: usize = 20;
+
+/// Compute which columns should actually be displayed given the terminal width.
+/// Progressively hides low-priority columns (lowest priority first) until
+/// the Command column has at least MIN_COMMAND_WIDTH characters.
+/// The currently sorted column is never auto-hidden.
+pub fn compute_display_columns(
+    headers: &[(&str, u16, ProcessSortField, u8)],
+    visible: &std::collections::HashSet<ProcessSortField>,
+    width: u16,
+    sort_field: ProcessSortField,
+) -> std::collections::HashSet<ProcessSortField> {
+    // Collect removable fixed-width columns sorted by priority (lowest first)
+    let mut removable: Vec<(ProcessSortField, u16, u8)> = headers.iter()
+        .filter(|(_, w, field, _)| *w > 0 && visible.contains(field))
+        .map(|(_, w, field, prio)| (*field, *w, *prio))
+        .collect();
+    removable.sort_by_key(|(_, _, prio)| *prio);
+
+    let mut result = visible.clone();
+
+    loop {
+        let fixed_w: usize = headers.iter()
+            .filter(|(_, w, field, _)| *w > 0 && result.contains(field))
+            .map(|(_, w, _, _)| *w as usize + 1)
+            .sum();
+        let cmd_space = (width as usize).saturating_sub(fixed_w);
+
+        if cmd_space >= MIN_COMMAND_WIDTH {
+            break;
+        }
+
+        // Find the lowest-priority column still in result (skip sort field & Command)
+        if let Some(pos) = removable.iter().position(|(field, _, _)| {
+            result.contains(field)
+                && *field != sort_field
+                && *field != ProcessSortField::Command
+        }) {
+            result.remove(&removable[pos].0);
+        } else {
+            break; // nothing left to remove
+        }
+    }
+
+    result
 }
 
-/// Total width of visible fixed-width columns
-fn fixed_cols_width_visible(app: &App) -> usize {
-    HEADERS.iter()
-        .filter(|(_, _, field)| app.visible_columns.contains(field))
-        .map(|(_, w, _)| if *w > 0 { *w as usize + 1 } else { 0 })
+/// Total width of fixed-width columns in the given display set
+fn fixed_cols_width_for(
+    headers: &[(&str, u16, ProcessSortField, u8)],
+    display_cols: &std::collections::HashSet<ProcessSortField>,
+) -> usize {
+    headers.iter()
+        .filter(|(_, _, field, _)| display_cols.contains(field))
+        .map(|(_, w, _, _)| if *w > 0 { *w as usize + 1 } else { 0 })
         .sum()
-}
-
-/// Total width of I/O tab fixed-width columns
-fn io_fixed_cols_width() -> usize {
-    IO_HEADERS.iter().map(|(_, w, _)| if *w > 0 { *w as usize + 1 } else { 0 }).sum()
-}
-
-/// Total width of Net tab fixed-width columns
-fn net_fixed_cols_width() -> usize {
-    NET_HEADERS.iter().map(|(_, w, _)| if *w > 0 { *w as usize + 1 } else { 0 }).sum()
 }
 
 /// Build a single process row as a styled Line (matching htop's exact columns)
@@ -240,6 +282,7 @@ fn build_process_row(
     app: &App,
     selected: bool,
     tagged: bool,
+    display_cols: &std::collections::HashSet<ProcessSortField>,
 ) -> Line<'static> {
     let cs = &app.color_scheme;
     let bg = if selected { cs.process_selected_bg } else { cs.process_bg };
@@ -281,7 +324,7 @@ fn build_process_row(
     };
 
     // Command column: htop highlights the basename in bold/color
-    let cmd_width = width.saturating_sub(fixed_cols_width_visible(app));
+    let cmd_width = width.saturating_sub(fixed_cols_width_for(HEADERS, display_cols));
     // 'p' toggle: show full command path or just the process name
     let cmd_text = if app.show_full_path {
         proc.command.clone()
@@ -302,49 +345,49 @@ fn build_process_row(
     
     use crate::system::process::ProcessSortField;
     
-    if app.visible_columns.contains(&ProcessSortField::Pid) {
+    if display_cols.contains(&ProcessSortField::Pid) {
         spans.push(Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)));
     }
-    if app.visible_columns.contains(&ProcessSortField::Ppid) {
+    if display_cols.contains(&ProcessSortField::Ppid) {
         spans.push(Span::styled(format!("{:>6} ", proc.ppid), base_style.fg(cs.col_pid)));
     }
-    if app.visible_columns.contains(&ProcessSortField::User) {
+    if display_cols.contains(&ProcessSortField::User) {
         spans.push(Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(cs.col_user)));
     }
-    if app.visible_columns.contains(&ProcessSortField::Priority) {
+    if display_cols.contains(&ProcessSortField::Priority) {
         spans.push(Span::styled(format!("{:>3} ", proc.priority), base_style.fg(cs.col_priority)));
     }
-    if app.visible_columns.contains(&ProcessSortField::Nice) {
+    if display_cols.contains(&ProcessSortField::Nice) {
         spans.push(Span::styled(format!("{:>3} ", proc.nice), base_style.fg(default_fg)));
     }
-    if app.visible_columns.contains(&ProcessSortField::VirtMem) {
+    if display_cols.contains(&ProcessSortField::VirtMem) {
         spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.virtual_mem)), base_style.fg(cs.col_priority)));
     }
-    if app.visible_columns.contains(&ProcessSortField::ResMem) {
+    if display_cols.contains(&ProcessSortField::ResMem) {
         spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.resident_mem)), base_style.fg(default_fg).add_modifier(Modifier::BOLD)));
     }
-    if app.visible_columns.contains(&ProcessSortField::SharedMem) {
+    if display_cols.contains(&ProcessSortField::SharedMem) {
         spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.shared_mem)), base_style.fg(default_fg)));
     }
-    if app.visible_columns.contains(&ProcessSortField::Status) {
+    if display_cols.contains(&ProcessSortField::Status) {
         spans.push(Span::styled(format!("{} ", proc.status.symbol()), base_style.fg(status_fg)));
     }
-    if app.visible_columns.contains(&ProcessSortField::Cpu) {
+    if display_cols.contains(&ProcessSortField::Cpu) {
         spans.push(Span::styled(format!("{:>5.1} ", proc.cpu_usage), base_style.fg(cpu_fg)));
     }
-    if app.visible_columns.contains(&ProcessSortField::Mem) {
+    if display_cols.contains(&ProcessSortField::Mem) {
         spans.push(Span::styled(format!("{:>5.1} ", proc.mem_usage), base_style.fg(mem_fg)));
     }
-    if app.visible_columns.contains(&ProcessSortField::Time) {
+    if display_cols.contains(&ProcessSortField::Time) {
         spans.push(Span::styled(format!("{:>9} ", proc.format_time()), base_style.fg(default_fg)));
     }
-    if app.visible_columns.contains(&ProcessSortField::Threads) {
+    if display_cols.contains(&ProcessSortField::Threads) {
         spans.push(Span::styled(format!("{:>3} ", proc.threads), base_style.fg(cs.col_priority)));
     }
-    if app.visible_columns.contains(&ProcessSortField::IoReadRate) {
+    if display_cols.contains(&ProcessSortField::IoReadRate) {
         spans.push(Span::styled(format!("{:>9} ", format_io_rate(proc.io_read_rate)), base_style.fg(Color::Yellow)));
     }
-    if app.visible_columns.contains(&ProcessSortField::IoWriteRate) {
+    if display_cols.contains(&ProcessSortField::IoWriteRate) {
         spans.push(Span::styled(format!("{:>9} ", format_io_rate(proc.io_write_rate)), base_style.fg(Color::Magenta)));
     }
 
@@ -383,6 +426,7 @@ fn build_net_row(
     app: &App,
     selected: bool,
     tagged: bool,
+    display_cols: &std::collections::HashSet<ProcessSortField>,
 ) -> Line<'static> {
     let cs = &app.color_scheme;
     let bg = if selected { cs.process_selected_bg } else { cs.process_bg };
@@ -417,21 +461,36 @@ fn build_net_row(
         else if combined > 1024.0 { Color::Cyan }
         else { Color::White };
 
-    let cmd_width = width.saturating_sub(net_fixed_cols_width());
+    let cmd_width = width.saturating_sub(fixed_cols_width_for(NET_HEADERS, display_cols));
     let cmd_text = if app.show_full_path { proc.command.clone() } else { proc.name.clone() };
     let command_truncated = truncate_str(&cmd_text, cmd_width);
     let base_name = &proc.name;
 
-    let mut spans = vec![
-        Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)),
-        Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(cs.col_user)),
-        Span::styled(format!("{} ", proc.status.symbol()), base_style.fg(status_fg)),
-        Span::styled(format!("{:>5.1} ", proc.cpu_usage), base_style.fg(cpu_fg)),
-        Span::styled(format!("{:>9} ", format_io_rate_io_tab(proc.io_read_rate)), base_style.fg(read_fg)),
-        Span::styled(format!("{:>9} ", format_io_rate_io_tab(proc.io_write_rate)), base_style.fg(write_fg)),
-        Span::styled(format!("{:>9} ", format_io_rate_io_tab(combined)), base_style.fg(total_fg)),
-        Span::styled(format!("{:>5.1} ", proc.mem_usage), base_style.fg(mem_fg)),
-    ];
+    let mut spans = Vec::new();
+    if display_cols.contains(&ProcessSortField::Pid) {
+        spans.push(Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::User) {
+        spans.push(Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(cs.col_user)));
+    }
+    if display_cols.contains(&ProcessSortField::Status) {
+        spans.push(Span::styled(format!("{} ", proc.status.symbol()), base_style.fg(status_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::Cpu) {
+        spans.push(Span::styled(format!("{:>5.1} ", proc.cpu_usage), base_style.fg(cpu_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::IoReadRate) {
+        spans.push(Span::styled(format!("{:>9} ", format_io_rate_io_tab(proc.io_read_rate)), base_style.fg(read_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::IoWriteRate) {
+        spans.push(Span::styled(format!("{:>9} ", format_io_rate_io_tab(proc.io_write_rate)), base_style.fg(write_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::IoRate) {
+        spans.push(Span::styled(format!("{:>9} ", format_io_rate_io_tab(combined)), base_style.fg(total_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::Mem) {
+        spans.push(Span::styled(format!("{:>5.1} ", proc.mem_usage), base_style.fg(mem_fg)));
+    }
 
     if let Some(pos) = command_truncated.find(base_name.as_str()) {
         let before = &command_truncated[..pos];
@@ -517,6 +576,7 @@ fn build_io_row(
     app: &App,
     selected: bool,
     tagged: bool,
+    display_cols: &std::collections::HashSet<ProcessSortField>,
 ) -> Line<'static> {
     let cs = &app.color_scheme;
     let bg = if selected { cs.process_selected_bg } else { cs.process_bg };
@@ -562,7 +622,7 @@ fn build_io_row(
     let io_prio = io_priority_label(proc.priority);
 
     // Command column width
-    let cmd_width = width.saturating_sub(io_fixed_cols_width());
+    let cmd_width = width.saturating_sub(fixed_cols_width_for(IO_HEADERS, display_cols));
     let cmd_text = if app.show_full_path {
         proc.command.clone()
     } else {
@@ -589,16 +649,31 @@ fn build_io_row(
     let command_truncated = truncate_str(&command_display, cmd_width);
     let base_name = &proc.name;
 
-    let mut spans = vec![
-        Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)),
-        Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(cs.col_user)),
-        Span::styled(format!("{:<3} ", io_prio), base_style.fg(default_fg)),
-        Span::styled(format!("{:>9} ", format_io_rate_io_tab(combined_rate)), base_style.fg(combined_fg)),
-        Span::styled(format!("{:>9} ", format_io_rate_io_tab(proc.io_read_rate)), base_style.fg(read_fg)),
-        Span::styled(format!("{:>10} ", format_io_rate_io_tab(proc.io_write_rate)), base_style.fg(write_fg)),
-        Span::styled(format!("{:>5} ", swpd_str), base_style.fg(cs.col_status_unknown)),
-        Span::styled(format!("{:>5} ", iod_str), base_style.fg(cs.col_status_unknown)),
-    ];
+    let mut spans = Vec::new();
+    if display_cols.contains(&ProcessSortField::Pid) {
+        spans.push(Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::User) {
+        spans.push(Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(cs.col_user)));
+    }
+    if display_cols.contains(&ProcessSortField::Priority) {
+        spans.push(Span::styled(format!("{:<3} ", io_prio), base_style.fg(default_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::IoRate) {
+        spans.push(Span::styled(format!("{:>9} ", format_io_rate_io_tab(combined_rate)), base_style.fg(combined_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::IoReadRate) {
+        spans.push(Span::styled(format!("{:>9} ", format_io_rate_io_tab(proc.io_read_rate)), base_style.fg(read_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::IoWriteRate) {
+        spans.push(Span::styled(format!("{:>10} ", format_io_rate_io_tab(proc.io_write_rate)), base_style.fg(write_fg)));
+    }
+    if display_cols.contains(&ProcessSortField::Mem) {
+        spans.push(Span::styled(format!("{:>5} ", swpd_str), base_style.fg(cs.col_status_unknown)));
+    }
+    if display_cols.contains(&ProcessSortField::Cpu) {
+        spans.push(Span::styled(format!("{:>5} ", iod_str), base_style.fg(cs.col_status_unknown)));
+    }
 
     // Command with basename highlighting
     if let Some(pos) = command_truncated.find(base_name.as_str()) {

@@ -133,15 +133,14 @@ fn draw_meters_panel(f: &mut Frame, app: &App, area: Rect) {
         ])
         .split(area);
 
-    // Left column meters
-    let left_meters = vec!["CPUs (1/1)", "Memory", "Swap", "Network"];
+    // Left column meters (from app state)
     let mut left_lines = vec![
         Line::from(Span::styled(
             " Left Column",
             Style::default().fg(cs.popup_title).add_modifier(Modifier::BOLD),
         )),
     ];
-    for (i, m) in left_meters.iter().enumerate() {
+    for (i, m) in app.left_meters.iter().enumerate() {
         let is_sel = app.setup_panel == 1 && app.setup_meter_col == 0 && i == app.setup_menu_index;
         let bg = if is_sel { Color::Indexed(236) } else { Color::Reset };
         let fg = if is_sel { Color::Yellow } else { cs.popup_text };
@@ -152,15 +151,14 @@ fn draw_meters_panel(f: &mut Frame, app: &App, area: Rect) {
     }
     f.render_widget(Paragraph::new(left_lines), cols[0]);
 
-    // Right column meters
-    let right_meters = vec!["CPUs (2/2)", "Tasks", "Load average", "Uptime"];
+    // Right column meters (from app state)
     let mut right_lines = vec![
         Line::from(Span::styled(
             " Right Column",
             Style::default().fg(cs.popup_title).add_modifier(Modifier::BOLD),
         )),
     ];
-    for (i, m) in right_meters.iter().enumerate() {
+    for (i, m) in app.right_meters.iter().enumerate() {
         let is_sel = app.setup_panel == 1 && app.setup_meter_col == 1 && i == app.setup_menu_index;
         let bg = if is_sel { Color::Indexed(236) } else { Color::Reset };
         let fg = if is_sel { Color::Yellow } else { cs.popup_text };
@@ -196,6 +194,14 @@ fn draw_meters_panel(f: &mut Frame, app: &App, area: Rect) {
     avail_lines.push(Line::from(""));
     avail_lines.push(Line::from(Span::styled(
         "  ←→ Column  ↑↓ Navigate",
+        Style::default().fg(Color::DarkGray),
+    )));
+    avail_lines.push(Line::from(Span::styled(
+        "  Enter Add  Del Remove",
+        Style::default().fg(Color::DarkGray),
+    )));
+    avail_lines.push(Line::from(Span::styled(
+        "  F7 Move up  F8 Move down",
         Style::default().fg(Color::DarkGray),
     )));
     f.render_widget(Paragraph::new(avail_lines), cols[2]);

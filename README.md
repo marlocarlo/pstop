@@ -50,6 +50,7 @@ If you've ever missed `htop` on Windows, your search is over. **pstop** brings t
 |---|:---:|:---:|:---:|
 | Real-time CPU per-core bars | ✅ | ❌ | ❌ |
 | Memory / Swap / Network bars | ✅ | Partial | ❌ |
+| GPU utilization & VRAM bars | ✅ | Basic | ❌ |
 | Tree view (process hierarchy) | ✅ | ❌ | ❌ |
 | Search & filter processes | ✅ | Basic | ❌ |
 | Kill / change priority | ✅ | ✅ | Manual |
@@ -119,12 +120,14 @@ This adds `Set-Alias htop pstop` to your `$PROFILE` automatically.
 ## Features
 
 ### 🖥️ Per-Core CPU Monitoring
-Real-time CPU usage bars for every logical core, color-coded by usage type (user / system / virtual), exactly like htop.
+Real-time CPU usage bars for every logical core, color-coded by usage type (user / system / virtual), exactly like htop. CPU columns auto-adjust based on core count (2/4/8/16 columns) and terminal size — just like htop's `calcColumnWidthCount`.
 
-### 📊 Memory, Swap & Network Bars
+### 📊 Memory, Swap, Network & GPU Bars
 - **Mem** bar: shows used (green), buffers (blue), cached (yellow)
 - **Swap** bar: swap usage with color threshold
 - **Net** bar: live RX/TX throughput in the header
+- **GPU** bar: overall GPU utilization percentage (shown on GPU tab)
+- **VMem** bar: dedicated video memory usage (shown on GPU tab)
 
 ### 🌳 Tree View
 Press `F5` or `t` to toggle process tree view — see parent-child relationships with `├─` / `└─` tree connectors, collapsible nodes with `+`/`-`.
@@ -133,10 +136,11 @@ Press `F5` or `t` to toggle process tree view — see parent-child relationships
 - **F3** - Incremental search: jumps to matching process
 - **F4** - Filter: hides all non-matching processes in real-time
 
-### 📋 Three Tab Views
+### 📋 Four Tab Views
 - **Main** - Full process table (PID, USER, CPU%, MEM%, TIME+, Command...)
 - **I/O** - Disk read/write rates per process
-- **Net** - Network I/O focused view
+- **Net** - Real network connections per process (TCP/UDP, local & remote addresses, state) via Windows `GetExtendedTcpTable` / `GetExtendedUdpTable` APIs
+- **GPU** - Per-process GPU engine utilization and dedicated/shared video memory usage via PDH performance counters
 
 ### ⚙️ F2 Setup Menu (Full htop Parity)
 Press `F2` to open the setup menu with 4 categories:
@@ -190,7 +194,7 @@ All settings auto-save to `%APPDATA%/pstop/pstoprc` and restore on next launch. 
 | `F7` / `F8` | Decrease / Increase process priority (nice) |
 | `F9` / `k` | Kill process |
 | `F10` / `q` | Quit |
-| `Tab` | Switch between Main / I/O / Net views |
+| `Tab` | Switch between Main / I/O / Net / GPU views |
 | `Space` | Tag process |
 | `c` | Tag process and children |
 | `U` | Untag all |
@@ -259,9 +263,11 @@ Format: simple `key=value` (htoprc-style). Persisted settings include:
 - [x] Pre-built binaries via GitHub Releases
 - [x] WinGet (`winget install marlocarlo.pstop`)
 - [x] Chocolatey (`choco install pstop`)
+- [x] GPU monitoring (per-process GPU engine usage + VRAM, header GPU/VMem bars)
+- [x] Network per-process tracking (real TCP/UDP connections via OS APIs)
+- [x] Auto-adjusting CPU column layout (2/4/8/16 columns based on core count)
+- [x] Independent htop-style header panel flow (no forced alignment)
 - [ ] Scoop bucket
-- [ ] GPU monitoring
-- [ ] Network per-process tracking
 - [ ] Custom meter plugins
 
 ---

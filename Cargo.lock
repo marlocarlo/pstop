@@ -435,11 +435,12 @@ dependencies = [
 
 [[package]]
 name = "pstop"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
  "crossterm",
+ "ntapi",
  "ratatui",
  "sysinfo",
  "unicode-width 0.2.0",

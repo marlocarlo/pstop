@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::color_scheme::{ColorScheme, ColorSchemeId};
 use crate::system::cpu::CpuInfo;
+use crate::system::gpu::GpuProcessInfo;
 use crate::system::memory::MemoryInfo;
+use crate::system::netstat::NetConnection;
 use crate::system::network::NetworkInfo;
 use crate::system::process::{ProcessInfo, ProcessSortField};
 
@@ -11,7 +13,8 @@ use crate::system::process::{ProcessInfo, ProcessSortField};
 pub enum ProcessTab {
     Main,  // Standard process view
     Io,    // I/O-focused view
-    Net,   // Network-focused view (pstop extension)
+    Net,   // Network connections view (real per-process connections)
+    Gpu,   // GPU usage per process (GPU-agnostic via PDH)
 }
 
 /// Which view/mode the app is currently in
@@ -46,6 +49,20 @@ pub struct App {
     pub network_info: NetworkInfo,
     pub processes: Vec<ProcessInfo>,
     pub filtered_processes: Vec<ProcessInfo>,
+
+    // Network connections (Net tab)
+    pub connections: Vec<NetConnection>,
+    pub net_selected_index: usize,
+    pub net_scroll_offset: usize,
+
+    // GPU per-process data (GPU tab)
+    pub gpu_processes: Vec<GpuProcessInfo>,
+    pub gpu_adapter_name: String,
+    pub gpu_overall_usage: f64,
+    pub gpu_dedicated_mem: u64,     // Total dedicated GPU memory in use
+    pub gpu_shared_mem: u64,        // Total shared GPU memory in use
+    pub gpu_selected_index: usize,
+    pub gpu_scroll_offset: usize,
 
     // Process table state
     pub selected_index: usize,
@@ -102,6 +119,10 @@ pub struct App {
     pub load_avg_5: f64,
     pub load_avg_15: f64,
 
+    // CPU user/kernel time split (from GetSystemTimes)
+    pub cpu_user_frac: f64,    // fraction of CPU time in user mode (0.0 - 1.0)
+    pub cpu_kernel_frac: f64,  // fraction of CPU time in kernel mode (0.0 - 1.0)
+
     // Kill mode signal selection
     pub kill_signal_index: usize,
 
@@ -114,6 +135,8 @@ pub struct App {
     pub setup_category: usize,      // 0=Meters, 1=Display, 2=Colors, 3=Columns
     pub setup_panel: usize,         // 0=categories, 1=options/columns
     pub setup_meter_col: usize,     // 0=left, 1=right (Meters category)
+    pub left_meters: Vec<String>,   // Configurable left header meters
+    pub right_meters: Vec<String>,  // Configurable right header meters
 
     // Display options (F2 Setup → Display options) — full htop parity
     pub show_tree_by_default: bool,
@@ -166,6 +189,18 @@ impl App {
             processes: Vec::new(),
             filtered_processes: Vec::new(),
 
+            connections: Vec::new(),
+            net_selected_index: 0,
+            net_scroll_offset: 0,
+
+            gpu_processes: Vec::new(),
+            gpu_adapter_name: String::new(),
+            gpu_overall_usage: 0.0,
+            gpu_dedicated_mem: 0,
+            gpu_shared_mem: 0,
+            gpu_selected_index: 0,
+            gpu_scroll_offset: 0,
+
             selected_index: 0,
             scroll_offset: 0,
             visible_rows: 20,
@@ -202,6 +237,9 @@ impl App {
             load_avg_5: 0.0,
             load_avg_15: 0.0,
 
+            cpu_user_frac: 0.7,
+            cpu_kernel_frac: 0.3,
+
             kill_signal_index: 1, // Default to SIGKILL (force) on Windows
 
             affinity_cpus: Vec::new(),
@@ -225,6 +263,18 @@ impl App {
             setup_category: 0,
             setup_panel: 0,
             setup_meter_col: 0,
+            left_meters: vec![
+                "CPUs (1/1)".to_string(),
+                "Memory".to_string(),
+                "Swap".to_string(),
+                "Network".to_string(),
+            ],
+            right_meters: vec![
+                "CPUs (2/2)".to_string(),
+                "Tasks".to_string(),
+                "Load average".to_string(),
+                "Uptime".to_string(),
+            ],
             show_tree_by_default: false,
             highlight_base_name: true,
             shadow_other_users: false,
@@ -283,37 +333,45 @@ impl App {
 
     /// Apply user filter and F4 filter query to process list
     pub fn apply_filter(&mut self) {
-        self.filtered_processes = self.processes.clone();
+        // Build filtered list from processes — filters inline to avoid full clone
+        let user_filter = self.user_filter.as_ref().map(|u| u.to_lowercase());
+        let hide_kernel = self.hide_kernel_threads;
+        let filter_empty = self.filter_query.is_empty();
+        let query_lower = self.filter_query.to_lowercase();
+        let terms: Vec<&str> = if !filter_empty { query_lower.split('|').collect() } else { vec![] };
 
-        // User filter
-        if let Some(ref user) = self.user_filter {
-            let u = user.to_lowercase();
-            self.filtered_processes.retain(|p| p.user.to_lowercase() == u);
-        }
+        self.filtered_processes.clear();
+        for p in &self.processes {
+            // User filter
+            if let Some(ref u) = user_filter {
+                if p.user.to_lowercase() != *u {
+                    continue;
+                }
+            }
 
-        // Hide kernel threads (K toggle) - Windows: hide SYSTEM processes
-        if self.hide_kernel_threads {
-            self.filtered_processes.retain(|p| {
-                // Keep if user is not SYSTEM or NT AUTHORITY\SYSTEM
+            // Hide kernel threads (K toggle)
+            if hide_kernel {
                 let user_lower = p.user.to_lowercase();
-                !user_lower.contains("system") && !user_lower.contains("nt authority")
-            });
-        }
+                if user_lower.contains("system") || user_lower.contains("nt authority") {
+                    continue;
+                }
+            }
 
-        // F4 persistent filter (filter_query)
-        // htop: filters Command column only, supports | for OR, case-insensitive
-        if !self.filter_query.is_empty() {
-            let query_lower = self.filter_query.to_lowercase();
-            let terms: Vec<&str> = query_lower.split('|').collect();
-            self.filtered_processes.retain(|p| {
+            // F4 persistent filter
+            if !filter_empty {
                 let name_lower = p.name.to_lowercase();
                 let cmd_lower = p.command.to_lowercase();
-                terms.iter().any(|term| {
+                let matches = terms.iter().any(|term| {
                     let t = term.trim();
                     if t.is_empty() { return false; }
                     name_lower.contains(t) || cmd_lower.contains(t)
-                })
-            });
+                });
+                if !matches {
+                    continue;
+                }
+            }
+
+            self.filtered_processes.push(p.clone());
         }
     }
 
@@ -413,18 +471,21 @@ impl App {
 
     /// Build tree view by organizing processes by parent-child relationship
     pub fn build_tree_view(&mut self) {
+        // Build a HashSet of all PIDs for O(1) parent lookup (was O(n²))
+        let all_pids: HashSet<u32> = self.filtered_processes.iter().map(|p| p.pid).collect();
+
         let mut children_map: HashMap<u32, Vec<usize>> = HashMap::new();
         let mut root_indices: Vec<usize> = Vec::new();
 
         for (i, proc) in self.filtered_processes.iter().enumerate() {
-            if proc.ppid == 0 || !self.filtered_processes.iter().any(|p| p.pid == proc.ppid) {
+            if proc.ppid == 0 || !all_pids.contains(&proc.ppid) {
                 root_indices.push(i);
             } else {
                 children_map.entry(proc.ppid).or_default().push(i);
             }
         }
 
-        let mut ordered: Vec<(usize, usize, bool)> = Vec::new();
+        let mut ordered: Vec<(usize, usize, bool)> = Vec::with_capacity(self.filtered_processes.len());
 
         fn dfs(
             idx: usize,
@@ -454,79 +515,118 @@ impl App {
             dfs(root_idx, 0, ri == len - 1, &self.filtered_processes, &children_map, &self.collapsed_pids, &mut ordered);
         }
 
-        let old_procs = self.filtered_processes.clone();
-        self.filtered_processes.clear();
+        // Rebuild in-place: collect into a new vec, then swap
+        let mut new_procs = Vec::with_capacity(ordered.len());
         for (idx, depth, is_last) in ordered {
-            let mut proc = old_procs[idx].clone();
+            let mut proc = self.filtered_processes[idx].clone();
             proc.depth = depth;
             proc.is_last_child = is_last;
-            self.filtered_processes.push(proc);
+            new_procs.push(proc);
         }
+        self.filtered_processes = new_procs;
     }
 
     /// Move selection up
     pub fn select_prev(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-            if self.selected_index < self.scroll_offset {
-                self.scroll_offset = self.selected_index;
+        let idx = self.active_selected_index_mut();
+        if *idx > 0 {
+            *idx -= 1;
+            let idx_val = *idx;
+            let scroll = self.active_scroll_offset_mut();
+            if idx_val < *scroll {
+                *scroll = idx_val;
             }
         }
     }
 
     /// Move selection down
     pub fn select_next(&mut self) {
-        let max = if self.filtered_processes.is_empty() {
-            0
-        } else {
-            self.filtered_processes.len() - 1
-        };
-        if self.selected_index < max {
-            self.selected_index += 1;
-            if self.selected_index >= self.scroll_offset + self.visible_rows {
-                self.scroll_offset = self.selected_index - self.visible_rows + 1;
+        let max = self.active_list_len().saturating_sub(1);
+        let idx = self.active_selected_index_mut();
+        if *idx < max {
+            *idx += 1;
+            let idx_val = *idx;
+            let visible = self.visible_rows;
+            let scroll = self.active_scroll_offset_mut();
+            if idx_val >= *scroll + visible {
+                *scroll = idx_val - visible + 1;
             }
         }
     }
 
     /// Page up
     pub fn page_up(&mut self) {
-        if self.selected_index > self.visible_rows {
-            self.selected_index -= self.visible_rows;
+        let visible = self.visible_rows;
+        let idx = self.active_selected_index_mut();
+        if *idx > visible {
+            *idx -= visible;
         } else {
-            self.selected_index = 0;
+            *idx = 0;
         }
-        if self.selected_index < self.scroll_offset {
-            self.scroll_offset = self.selected_index;
+        let idx_val = *idx;
+        let scroll = self.active_scroll_offset_mut();
+        if idx_val < *scroll {
+            *scroll = idx_val;
         }
     }
 
     /// Page down
     pub fn page_down(&mut self) {
-        let max = if self.filtered_processes.is_empty() {
-            0
-        } else {
-            self.filtered_processes.len() - 1
-        };
-        self.selected_index = (self.selected_index + self.visible_rows).min(max);
-        if self.selected_index >= self.scroll_offset + self.visible_rows {
-            self.scroll_offset = self.selected_index - self.visible_rows + 1;
+        let max = self.active_list_len().saturating_sub(1);
+        let visible = self.visible_rows;
+        let idx = self.active_selected_index_mut();
+        *idx = (*idx + visible).min(max);
+        let idx_val = *idx;
+        let scroll = self.active_scroll_offset_mut();
+        if idx_val >= *scroll + visible {
+            *scroll = idx_val - visible + 1;
         }
     }
 
     /// Home
     pub fn select_first(&mut self) {
-        self.selected_index = 0;
-        self.scroll_offset = 0;
+        *self.active_selected_index_mut() = 0;
+        *self.active_scroll_offset_mut() = 0;
     }
 
     /// End
     pub fn select_last(&mut self) {
-        if !self.filtered_processes.is_empty() {
-            self.selected_index = self.filtered_processes.len() - 1;
-            if self.selected_index >= self.visible_rows {
-                self.scroll_offset = self.selected_index - self.visible_rows + 1;
+        let len = self.active_list_len();
+        if len > 0 {
+            let visible = self.visible_rows;
+            let last = len - 1;
+            *self.active_selected_index_mut() = last;
+            let scroll = self.active_scroll_offset_mut();
+            if last >= visible {
+                *scroll = last - visible + 1;
             }
+        }
+    }
+
+    /// Get the active list length for the current tab
+    fn active_list_len(&self) -> usize {
+        match self.active_tab {
+            ProcessTab::Main | ProcessTab::Io => self.filtered_processes.len(),
+            ProcessTab::Net => self.connections.len(),
+            ProcessTab::Gpu => self.gpu_processes.len(),
+        }
+    }
+
+    /// Get mutable ref to the selected index for the current tab
+    fn active_selected_index_mut(&mut self) -> &mut usize {
+        match self.active_tab {
+            ProcessTab::Main | ProcessTab::Io => &mut self.selected_index,
+            ProcessTab::Net => &mut self.net_selected_index,
+            ProcessTab::Gpu => &mut self.gpu_selected_index,
+        }
+    }
+
+    /// Get mutable ref to the scroll offset for the current tab
+    fn active_scroll_offset_mut(&mut self) -> &mut usize {
+        match self.active_tab {
+            ProcessTab::Main | ProcessTab::Io => &mut self.scroll_offset,
+            ProcessTab::Net => &mut self.net_scroll_offset,
+            ProcessTab::Gpu => &mut self.gpu_scroll_offset,
         }
     }
 
@@ -561,14 +661,23 @@ impl App {
     pub fn tag_with_children(&mut self) {
         if let Some(proc) = self.selected_process() {
             let root_pid = proc.pid;
-            // Collect all descendants
+            // Build parent→children map for O(n) traversal
+            let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
+            for p in &self.filtered_processes {
+                children_map.entry(p.ppid).or_default().push(p.pid);
+            }
+            // BFS from root
             let mut to_tag = vec![root_pid];
+            let mut visited = HashSet::new();
+            visited.insert(root_pid);
             let mut i = 0;
             while i < to_tag.len() {
                 let parent = to_tag[i];
-                for p in &self.filtered_processes {
-                    if p.ppid == parent && !to_tag.contains(&p.pid) {
-                        to_tag.push(p.pid);
+                if let Some(children) = children_map.get(&parent) {
+                    for &child in children {
+                        if visited.insert(child) {
+                            to_tag.push(child);
+                        }
                     }
                 }
                 i += 1;
@@ -602,11 +711,26 @@ impl App {
 
     /// Clamp selection to valid range
     pub fn clamp_selection(&mut self) {
+        // Clamp process list selections (Main/Io)
         if self.filtered_processes.is_empty() {
             self.selected_index = 0;
             self.scroll_offset = 0;
         } else if self.selected_index >= self.filtered_processes.len() {
             self.selected_index = self.filtered_processes.len() - 1;
+        }
+        // Clamp Net tab selection
+        if self.connections.is_empty() {
+            self.net_selected_index = 0;
+            self.net_scroll_offset = 0;
+        } else if self.net_selected_index >= self.connections.len() {
+            self.net_selected_index = self.connections.len() - 1;
+        }
+        // Clamp GPU tab selection
+        if self.gpu_processes.is_empty() {
+            self.gpu_selected_index = 0;
+            self.gpu_scroll_offset = 0;
+        } else if self.gpu_selected_index >= self.gpu_processes.len() {
+            self.gpu_selected_index = self.gpu_processes.len() - 1;
         }
     }
 }

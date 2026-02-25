@@ -3,12 +3,12 @@ use crossterm::event::{MouseEvent, MouseEventKind, MouseButton};
 use crate::app::{App, AppMode, ProcessTab};
 use crate::system::process::ProcessSortField;
 use crate::ui;
-use crate::ui::process_table::{HEADERS, IO_HEADERS, NET_HEADERS, compute_display_columns};
+use crate::ui::process_table::{HEADERS, IO_HEADERS, compute_display_columns};
 
 /// Handle a mouse event.
 /// Requires the terminal size (columns, rows) to compute layout areas.
 pub fn handle_mouse(app: &mut App, mouse: MouseEvent, term_width: u16, term_height: u16) {
-    let h_height = ui::header_height(app);
+    let h_height = ui::header_height(app, term_height, term_width);
 
     // Layout zones (same as ui::draw):
     //   [0]  y: 0          .. h_height-1          => header
@@ -55,25 +55,32 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent, term_width: u16, term_heig
 
 // ── Tab bar click ────────────────────────────────────────────────────
 
-/// Tab bar layout: " " (1) + " Main " (6) + " " (1) + " I/O " (5) + " " (1) + " Net " (5)
-/// Main: x in [1..7), I/O: x in [8..13), Net: x in [14..19)
+/// Tab bar layout: " " (1) + " Main " (6) + " " (1) + " I/O " (5) + " " (1) + " Net " (5) + " " (1) + " GPU " (5)
+/// Main: x in [1..7), I/O: x in [8..13), Net: x in [14..18), GPU: x in [19..23)
 fn handle_tab_bar_click(app: &mut App, x: u16) {
     if (1..7).contains(&x) {
         app.active_tab = ProcessTab::Main;
     } else if (8..13).contains(&x) {
         app.active_tab = ProcessTab::Io;
-    } else if (14..19).contains(&x) {
+    } else if (14..18).contains(&x) {
         app.active_tab = ProcessTab::Net;
+    } else if (19..24).contains(&x) {
+        app.active_tab = ProcessTab::Gpu;
     }
 }
 
 // ── Header click (sort by column) ───────────────────────────────────
 
 fn handle_header_click(app: &mut App, x: u16, term_width: u16) {
+    // Net and GPU tabs don't support column-click sorting (different data model)
+    if matches!(app.active_tab, ProcessTab::Net | ProcessTab::Gpu) {
+        return;
+    }
+
     let headers = match app.active_tab {
         ProcessTab::Main => HEADERS,
         ProcessTab::Io   => IO_HEADERS,
-        ProcessTab::Net  => NET_HEADERS,
+        _ => return,
     };
 
     // Compute display columns (same logic as rendering, so clicks match)

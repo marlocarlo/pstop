@@ -4,19 +4,27 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::app::App;
+use crate::app::{App, ProcessTab};
 use crate::system::memory::format_bytes;
 
 /// Draw the complete header area in htop's exact layout:
 ///
-/// LEFT COLUMN (50%):            RIGHT COLUMN (50%):
-///   0 [||||     25.3%]            8 [||||||     42.1%]
-///   1 [||||||   43.2%]            9 [||||       30.0%]
-///   ...                           ...
-///   Mem[||||used|||cache|    5.2G/16.0G]
-///   Swp[||               0.8G/8.0G]
+/// Each column flows independently — info meters appear immediately
+/// after the last CPU bar in that column, NOT force-aligned across panels.
 ///
-/// RIGHT side overlays (after CPUs): Tasks, Load average, Uptime
+/// LEFT COLUMN (50%):            RIGHT COLUMN (50%):
+///   0 [||||     25.3%]            4 [||||||     42.1%]
+///   1 [||||||   43.2%]            5 [||||       30.0%]
+///   2 [|||      18.0%]            6 [|||||      35.2%]
+///   3 [|||||    33.0%]            7 [|||        22.1%]
+///   Mem[||||used|||cache|    5.2G/16.0G]    Tasks: 312, 1024 thr; 5 running
+///   Swp[||               0.8G/8.0G]         Load average: 0.28 0.45 0.47
+///   Net[||||rx|||tx| 1.2M/s↓ 340K/s↑]      Uptime: 05:12:01
+///
+/// On GPU tab, left column replaces Swap+Net with GPU+VMem:
+///   Mem[||||used|||cache|    5.2G/16.0G]
+///   GPU[||||||||       45.2%]
+///   VMem[||||      2.1G used]
 pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     // Compact mode: single aggregate CPU bar + memory bar
     if app.compact_mode {
@@ -25,77 +33,186 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let cores = &app.cpu_info.cores;
-    let half = (cores.len() + 1) / 2; // Left column gets ceil(n/2) cores
+    let core_count = cores.len();
+    if core_count == 0 {
+        return;
+    }
 
-    // Split into left and right columns (htop classic layout)
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
+    // header_margin: add horizontal padding when enabled
+    let content_area = if app.header_margin {
+        Rect {
+            x: area.x + 1,
+            y: area.y,
+            width: area.width.saturating_sub(2),
+            height: area.height,
+        }
+    } else {
+        area
+    };
 
-    let left_col = columns[0];
-    let right_col = columns[1];
-
-    // Left column: first half of CPU cores + Mem + Swp + Net
-    let left_rows = half + 3; // cpu cores + mem + swap + net
-    let left_constraints: Vec<Constraint> = std::iter::repeat(Constraint::Length(1))
-        .take(left_rows)
-        .collect();
-    let left_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(left_constraints)
-        .split(left_col);
-
-    // Right column: second half of CPU cores + Tasks + Load + Uptime
-    let right_cpu_count = cores.len() - half;
-    let right_rows = right_cpu_count + 3; // cpu cores + tasks + load avg + uptime
-    let right_constraints: Vec<Constraint> = std::iter::repeat(Constraint::Length(1))
-        .take(right_rows)
-        .collect();
-    let right_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(right_constraints)
-        .split(right_col);
+    // Calculate optimal CPU column count (2, 4, 8, 16) — htop-style auto-alignment
+    let cpu_cols = {
+        let max_cpu_rows = (area.height as usize).saturating_sub(3);
+        if max_cpu_rows == 0 {
+            2usize
+        } else {
+            let max_by_width = (content_area.width / super::MIN_CPU_COL_WIDTH).max(2) as usize;
+            let mut result = 2usize;
+            for &cols in &[2, 4, 8, 16] {
+                if cols > max_by_width { break; }
+                let rows_needed = (core_count + cols - 1) / cols;
+                if rows_needed <= max_cpu_rows {
+                    result = cols;
+                    break;
+                }
+                result = cols;
+            }
+            result
+        }
+    };
 
     let cs = &app.color_scheme;
 
-    // --- Left column: CPU cores 0..half ---
-    for i in 0..half {
-        if i < cores.len() {
-            draw_cpu_bar(f, &cores[i], left_chunks[i], cs, app.cpu_count_from_zero);
+    // CPU distribution: first half goes to left panel, rest to right panel
+    let sub_cols_per_panel = (cpu_cols / 2).max(1);
+    let half = (core_count + 1) / 2;
+    let cores_per_sub_left = (half + sub_cols_per_panel - 1) / sub_cols_per_panel;
+    let right_core_count = core_count - half;
+    let cores_per_sub_right = if right_core_count > 0 {
+        (right_core_count + sub_cols_per_panel - 1) / sub_cols_per_panel
+    } else {
+        0
+    };
+
+    // htop-style: each column flows independently
+    let left_cpu_rows = cores_per_sub_left;
+    let right_cpu_rows = cores_per_sub_right;
+    let left_info_count = 3; // Mem + Swap/GPU + Net/VMem
+    let right_info_count = 3; // Tasks + Load + Uptime
+    let left_total = left_cpu_rows + left_info_count;
+    let right_total = right_cpu_rows + right_info_count;
+
+    // Split into left and right panels (50/50)
+    let panels = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(content_area);
+
+    // --- LEFT PANEL ---
+    {
+        let panel = panels[0];
+        let row_constraints: Vec<Constraint> = (0..left_total)
+            .map(|_| Constraint::Length(1))
+            .collect();
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(row_constraints)
+            .split(panel);
+
+        // CPU bars
+        if sub_cols_per_panel == 1 {
+            for i in 0..half.min(left_cpu_rows) {
+                if i < cores.len() && i < rows.len() {
+                    draw_cpu_bar(f, &cores[i], rows[i], cs, app.cpu_count_from_zero,
+                        app.cpu_user_frac, app.cpu_kernel_frac, app.detailed_cpu_time);
+                }
+            }
+        } else {
+            for row_i in 0..left_cpu_rows {
+                if row_i >= rows.len() { break; }
+                let sub_constraints: Vec<Constraint> = (0..sub_cols_per_panel)
+                    .map(|_| Constraint::Ratio(1, sub_cols_per_panel as u32))
+                    .collect();
+                let sub_cells = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints(sub_constraints)
+                    .split(rows[row_i]);
+
+                for sub_i in 0..sub_cols_per_panel {
+                    let core_idx = sub_i * cores_per_sub_left + row_i;
+                    if core_idx < half && core_idx < cores.len() && sub_i < sub_cells.len() {
+                        draw_cpu_bar(f, &cores[core_idx], sub_cells[sub_i], cs,
+                            app.cpu_count_from_zero, app.cpu_user_frac, app.cpu_kernel_frac,
+                            app.detailed_cpu_time);
+                    }
+                }
+            }
+        }
+
+        // Info rows immediately after last CPU row (htop-style: no gap)
+        let info_start = left_cpu_rows;
+        if info_start < rows.len() {
+            draw_memory_bar(f, app, rows[info_start]);
+        }
+        if info_start + 1 < rows.len() {
+            if app.active_tab == ProcessTab::Gpu {
+                draw_gpu_bar(f, app, rows[info_start + 1]);
+            } else {
+                draw_swap_bar(f, app, rows[info_start + 1]);
+            }
+        }
+        if info_start + 2 < rows.len() {
+            if app.active_tab == ProcessTab::Gpu {
+                draw_vram_bar(f, app, rows[info_start + 2]);
+            } else {
+                draw_network_bar(f, app, rows[info_start + 2]);
+            }
         }
     }
 
-    // --- Left column: Mem bar ---
-    draw_memory_bar(f, app, left_chunks[half]);
+    // --- RIGHT PANEL ---
+    {
+        let panel = panels[1];
+        let row_constraints: Vec<Constraint> = (0..right_total)
+            .map(|_| Constraint::Length(1))
+            .collect();
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(row_constraints)
+            .split(panel);
 
-    // --- Left column: Swap bar ---
-    draw_swap_bar(f, app, left_chunks[half + 1]);
+        // CPU bars
+        if sub_cols_per_panel == 1 {
+            for i in 0..right_core_count.min(right_cpu_rows) {
+                let core_idx = half + i;
+                if core_idx < cores.len() && i < rows.len() {
+                    draw_cpu_bar(f, &cores[core_idx], rows[i], cs, app.cpu_count_from_zero,
+                        app.cpu_user_frac, app.cpu_kernel_frac, app.detailed_cpu_time);
+                }
+            }
+        } else {
+            for row_i in 0..right_cpu_rows {
+                if row_i >= rows.len() { break; }
+                let sub_constraints: Vec<Constraint> = (0..sub_cols_per_panel)
+                    .map(|_| Constraint::Ratio(1, sub_cols_per_panel as u32))
+                    .collect();
+                let sub_cells = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints(sub_constraints)
+                    .split(rows[row_i]);
 
-    // --- Left column: Network bar ---
-    draw_network_bar(f, app, left_chunks[half + 2]);
-
-    // --- Right column: CPU cores half..end ---
-    for i in 0..right_cpu_count {
-        let core_idx = half + i;
-        if core_idx < cores.len() {
-            draw_cpu_bar(f, &cores[core_idx], right_chunks[i], cs, app.cpu_count_from_zero);
+                for sub_i in 0..sub_cols_per_panel {
+                    let core_idx = half + sub_i * cores_per_sub_right + row_i;
+                    if core_idx < cores.len() && sub_i < sub_cells.len() {
+                        draw_cpu_bar(f, &cores[core_idx], sub_cells[sub_i], cs,
+                            app.cpu_count_from_zero, app.cpu_user_frac, app.cpu_kernel_frac,
+                            app.detailed_cpu_time);
+                    }
+                }
+            }
         }
-    }
 
-    // --- Right column: Tasks line ---
-    if right_cpu_count < right_chunks.len() {
-        draw_tasks_line(f, app, right_chunks[right_cpu_count]);
-    }
-
-    // --- Right column: Load average line ---
-    if right_cpu_count + 1 < right_chunks.len() {
-        draw_load_line(f, app, right_chunks[right_cpu_count + 1]);
-    }
-
-    // --- Right column: Uptime line ---
-    if right_cpu_count + 2 < right_chunks.len() {
-        draw_uptime_line(f, app, right_chunks[right_cpu_count + 2]);
+        // Info rows immediately after last CPU row (htop-style: no gap)
+        let info_start = right_cpu_rows;
+        if info_start < rows.len() {
+            draw_tasks_line(f, app, rows[info_start]);
+        }
+        if info_start + 1 < rows.len() {
+            draw_load_line(f, app, rows[info_start + 1]);
+        }
+        if info_start + 2 < rows.len() {
+            draw_uptime_line(f, app, rows[info_start + 2]);
+        }
     }
 }
 
@@ -120,8 +237,20 @@ fn draw_compact_header(f: &mut Frame, app: &App, area: Rect) {
     let available = bar_width.saturating_sub(label.len() + pct_label.len() + 3);
     let total_filled = ((avg_usage / 100.0) * available as f64) as usize;
     let total_filled = total_filled.min(available);
-    let green_portion = (total_filled as f64 * 0.7) as usize;
-    let red_portion = total_filled.saturating_sub(green_portion);
+    // Use real user/kernel split when detailed_cpu_time is on
+    let (green_portion, red_portion) = if app.detailed_cpu_time {
+        let total = app.cpu_user_frac + app.cpu_kernel_frac;
+        if total > 0.0 {
+            let u = (app.cpu_user_frac / total * total_filled as f64) as usize;
+            let k = total_filled.saturating_sub(u);
+            (u, k)
+        } else {
+            (total_filled, 0)
+        }
+    } else {
+        let g = (total_filled as f64 * 0.7) as usize;
+        (g, total_filled.saturating_sub(g))
+    };
     let empty = available.saturating_sub(total_filled);
     let line = Line::from(vec![
         Span::styled(&label, Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD)),
@@ -144,11 +273,9 @@ fn draw_compact_header(f: &mut Frame, app: &App, area: Rect) {
 ///   Blue   = low priority (nice > 0)
 ///   Cyan   = steal / virtualization overhead
 ///
-/// On Windows we can't separate user/kernel, so we approximate:
-///   Green portion  = 0-60% of usage (user estimate)
-///   Red portion    = 60-100% of usage (kernel estimate)
-///   This gives the visual multi-color effect matching htop.
-fn draw_cpu_bar(f: &mut Frame, core: &crate::system::cpu::CpuCore, area: Rect, cs: &crate::color_scheme::ColorScheme, cpu_from_zero: bool) {
+/// When detailed_cpu_time is ON, uses real GetSystemTimes data for user/kernel split.
+/// When OFF, uses a 70/30 visual approximation.
+fn draw_cpu_bar(f: &mut Frame, core: &crate::system::cpu::CpuCore, area: Rect, cs: &crate::color_scheme::ColorScheme, cpu_from_zero: bool, user_frac: f64, kernel_frac: f64, detailed: bool) {
     let usage = core.usage_percent;
     let display_id = if cpu_from_zero { core.id } else { core.id + 1 };
     let label = format!("{:>2}", display_id);
@@ -163,8 +290,21 @@ fn draw_cpu_bar(f: &mut Frame, core: &crate::system::cpu::CpuCore, area: Rect, c
     let total_filled = ((usage as f64 / 100.0) * available as f64) as usize;
     let total_filled = total_filled.min(available);
 
-    let green_portion = (total_filled as f64 * 0.7) as usize;
-    let red_portion = total_filled.saturating_sub(green_portion);
+    // Use real user/kernel split from GetSystemTimes when detailed_cpu_time is on
+    let (user_portion, kernel_portion) = if detailed {
+        let total = user_frac + kernel_frac;
+        if total > 0.0 {
+            let u = (user_frac / total * total_filled as f64) as usize;
+            let k = total_filled.saturating_sub(u);
+            (u, k)
+        } else {
+            (total_filled, 0)
+        }
+    } else {
+        let green_portion = (total_filled as f64 * 0.7) as usize;
+        let red_portion = total_filled.saturating_sub(green_portion);
+        (green_portion, red_portion)
+    };
     let empty = available.saturating_sub(total_filled);
 
     let line = Line::from(vec![
@@ -173,8 +313,8 @@ fn draw_cpu_bar(f: &mut Frame, core: &crate::system::cpu::CpuCore, area: Rect, c
             Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD),
         ),
         Span::styled("[", Style::default().fg(cs.cpu_label)),
-        Span::styled("|".repeat(green_portion), Style::default().fg(cs.cpu_bar_normal)),
-        Span::styled("|".repeat(red_portion), Style::default().fg(cs.cpu_bar_system)),
+        Span::styled("|".repeat(user_portion), Style::default().fg(cs.cpu_bar_normal)),
+        Span::styled("|".repeat(kernel_portion), Style::default().fg(cs.cpu_bar_system)),
         Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
         Span::styled("]", Style::default().fg(cs.cpu_label)),
         Span::styled(pct_label, Style::default().fg(cs.cpu_label)),
@@ -365,4 +505,87 @@ fn format_uptime(seconds: u64) -> String {
     } else {
         format!("{:02}:{:02}:{:02}", hours, minutes, secs)
     }
+}
+
+/// Draw GPU utilization bar: "GPU[||||||||       45.2%]"
+fn draw_gpu_bar(f: &mut Frame, app: &App, area: Rect) {
+    let cs = &app.color_scheme;
+    let usage = app.gpu_overall_usage;
+    let usage_frac = (usage / 100.0).clamp(0.0, 1.0);
+
+    let suffix = format!("{:5.1}%", usage);
+    let prefix = "GPU";
+    let bar_width = area.width as usize;
+    let bracket_len = 2;
+    let available = bar_width.saturating_sub(prefix.len() + suffix.len() + bracket_len + 1);
+
+    let filled = (usage_frac * available as f64) as usize;
+    let filled = filled.min(available);
+    let empty = available.saturating_sub(filled);
+
+    // Color the bar: green < 50%, yellow 50-80%, red > 80%
+    let bar_color = if usage > 80.0 {
+        Color::Red
+    } else if usage > 50.0 {
+        Color::Yellow
+    } else {
+        cs.cpu_bar_normal
+    };
+
+    let line = Line::from(vec![
+        Span::styled(prefix, Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)),
+        Span::styled("[", Style::default().fg(cs.cpu_label)),
+        Span::styled("|".repeat(filled), Style::default().fg(bar_color)),
+        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
+        Span::styled("]", Style::default().fg(cs.cpu_label)),
+        Span::styled(suffix, Style::default().fg(cs.cpu_label)),
+    ]);
+
+    f.render_widget(Paragraph::new(line), area);
+}
+
+/// Draw GPU VRAM bar: "VMem[||||      2.1G used]"
+fn draw_vram_bar(f: &mut Frame, app: &App, area: Rect) {
+    let cs = &app.color_scheme;
+    let dedicated = app.gpu_dedicated_mem;
+
+    let used_str = format_bytes(dedicated);
+    let suffix = format!("{} used", used_str);
+
+    let prefix = "VMem";
+    let bar_width = area.width as usize;
+    let bracket_len = 2;
+    let available = bar_width.saturating_sub(prefix.len() + suffix.len() + bracket_len + 1);
+
+    // Scale against a reasonable GPU VRAM max — auto-detect would be ideal,
+    // but for now use 24 GB as a reasonable modern GPU ceiling.
+    let vram_max: u64 = 24 * 1024 * 1024 * 1024;
+    let usage_frac = if vram_max > 0 {
+        (dedicated as f64 / vram_max as f64).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
+    let filled = (usage_frac * available as f64) as usize;
+    let filled = filled.min(available);
+    let empty = available.saturating_sub(filled);
+
+    let bar_color = if usage_frac > 0.8 {
+        Color::Red
+    } else if usage_frac > 0.5 {
+        Color::Yellow
+    } else {
+        Color::LightCyan
+    };
+
+    let line = Line::from(vec![
+        Span::styled(prefix, Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)),
+        Span::styled("[", Style::default().fg(cs.cpu_label)),
+        Span::styled("|".repeat(filled), Style::default().fg(bar_color)),
+        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
+        Span::styled("]", Style::default().fg(cs.cpu_label)),
+        Span::styled(suffix, Style::default().fg(cs.cpu_label)),
+    ]);
+
+    f.render_widget(Paragraph::new(line), area);
 }

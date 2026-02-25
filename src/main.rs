@@ -120,7 +120,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<BufWriter<io::Stdout>>>, com
     loop {
         // Update visible rows based on terminal size
         let size = terminal.size()?;
-        let header_h = ui::header_height(&app) as usize;
+        let header_h = ui::header_height(&app, size.height, size.width) as usize;
         let footer_h = 1;
         let available = size.height as usize;
         // Account for search/filter bar stealing 1 row from process area

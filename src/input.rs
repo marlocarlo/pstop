@@ -46,15 +46,17 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
             app.active_tab = match app.active_tab {
                 ProcessTab::Main => ProcessTab::Io,
                 ProcessTab::Io => ProcessTab::Net,
-                ProcessTab::Net => ProcessTab::Main,
+                ProcessTab::Net => ProcessTab::Gpu,
+                ProcessTab::Gpu => ProcessTab::Main,
             };
         }
         KeyCode::BackTab => {
             // Shift+Tab goes backwards
             app.active_tab = match app.active_tab {
-                ProcessTab::Main => ProcessTab::Net,
+                ProcessTab::Main => ProcessTab::Gpu,
                 ProcessTab::Io => ProcessTab::Main,
                 ProcessTab::Net => ProcessTab::Io,
+                ProcessTab::Gpu => ProcessTab::Net,
             };
         }
 
@@ -519,7 +521,11 @@ fn handle_setup_mode(app: &mut App, key: KeyEvent) {
     let num_categories = 4usize; // Meters, Display options, Colors, Columns
     // Max index in content panel per category
     let max_content_idx = match app.setup_category {
-        0 => 3,  // 4 meters per column
+        0 => {
+            // Meters: depends on which column is selected
+            let meter_list = if app.setup_meter_col == 0 { &app.left_meters } else { &app.right_meters };
+            meter_list.len().saturating_sub(1)
+        }
         1 => 14, // 14 display options + interval row
         2 => ColorSchemeId::all().len().saturating_sub(1),
         3 => all_fields.len().saturating_sub(1), // All fields, not just visible ones
@@ -534,13 +540,28 @@ fn handle_setup_mode(app: &mut App, key: KeyEvent) {
         }
         // ── Panel switching ──
         KeyCode::Left => {
-            if app.setup_panel > 0 {
+            if app.setup_panel == 1 && app.setup_category == 0 {
+                // Meters: switch between left/right columns
+                if app.setup_meter_col > 0 {
+                    app.setup_meter_col -= 1;
+                    app.setup_menu_index = 0;
+                } else {
+                    app.setup_panel = 0;
+                    app.setup_menu_index = 0;
+                }
+            } else if app.setup_panel > 0 {
                 app.setup_panel -= 1;
                 app.setup_menu_index = 0;
             }
         }
         KeyCode::Right => {
-            if app.setup_panel < 1 {
+            if app.setup_panel == 1 && app.setup_category == 0 {
+                // Meters: switch between left/right columns
+                if app.setup_meter_col < 1 {
+                    app.setup_meter_col += 1;
+                    app.setup_menu_index = 0;
+                }
+            } else if app.setup_panel < 1 {
                 app.setup_panel += 1;
                 app.setup_menu_index = 0;
             }
@@ -612,7 +633,10 @@ fn handle_setup_mode(app: &mut App, key: KeyEvent) {
                             }
                         }
                     }
-                    _ => {} // Meters: future
+                    _ => {
+                        // Meters: add from available list (future: show available meters picker)
+                        // For now, no action on Enter in meter columns
+                    }
                 }
             }
         }
@@ -638,6 +662,38 @@ fn handle_setup_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Char('-') => {
             if app.setup_category == 1 {
                 app.update_interval_ms = app.update_interval_ms.saturating_sub(100).max(200);
+            }
+        }
+        KeyCode::Delete | KeyCode::Backspace => {
+            // Remove selected meter from current column (Meters category only)
+            if app.setup_category == 0 && app.setup_panel == 1 {
+                let meters = if app.setup_meter_col == 0 { &mut app.left_meters } else { &mut app.right_meters };
+                if !meters.is_empty() && app.setup_menu_index < meters.len() {
+                    meters.remove(app.setup_menu_index);
+                    if app.setup_menu_index > 0 && app.setup_menu_index >= meters.len() {
+                        app.setup_menu_index = meters.len().saturating_sub(1);
+                    }
+                }
+            }
+        }
+        KeyCode::F(7) => {
+            // Move meter up in current column (Meters category)
+            if app.setup_category == 0 && app.setup_panel == 1 {
+                let meters = if app.setup_meter_col == 0 { &mut app.left_meters } else { &mut app.right_meters };
+                if app.setup_menu_index > 0 && app.setup_menu_index < meters.len() {
+                    meters.swap(app.setup_menu_index, app.setup_menu_index - 1);
+                    app.setup_menu_index -= 1;
+                }
+            }
+        }
+        KeyCode::F(8) => {
+            // Move meter down in current column (Meters category)
+            if app.setup_category == 0 && app.setup_panel == 1 {
+                let meters = if app.setup_meter_col == 0 { &mut app.left_meters } else { &mut app.right_meters };
+                if app.setup_menu_index + 1 < meters.len() {
+                    meters.swap(app.setup_menu_index, app.setup_menu_index + 1);
+                    app.setup_menu_index += 1;
+                }
             }
         }
         _ => {}

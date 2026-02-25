@@ -4,10 +4,12 @@ use sysinfo::{System, ProcessStatus as SysProcessStatus, ProcessesToUpdate, Netw
 
 use crate::app::App;
 use crate::system::cpu::{CpuCore, CpuInfo};
+use crate::system::gpu::GpuCollector;
 use crate::system::memory::MemoryInfo;
 use crate::system::network::NetworkInfo;
 use crate::system::process::{ProcessInfo, ProcessStatus};
 use crate::system::winapi;
+use crate::system::netstat;
 
 /// System data collector using the `sysinfo` crate, with Windows user resolution
 pub struct Collector {
@@ -32,6 +34,13 @@ pub struct Collector {
     /// Accounts for Fast Startup, which causes GetTickCount64() to report
     /// inflated uptime because the kernel hibernates instead of rebooting.
     boot_time_unix: Option<i64>,
+    /// CPU user/kernel time split tracker (via GetSystemTimes)
+    cpu_time_split: winapi::CpuTimeSplit,
+    /// Last sampled CPU user/kernel fractions
+    pub cpu_user_frac: f64,
+    pub cpu_kernel_frac: f64,
+    /// GPU collector (persistent PDH query)
+    gpu_collector: GpuCollector,
 }
 
 impl Collector {
@@ -64,6 +73,10 @@ impl Collector {
             load_samples_5: 0.0,
             load_samples_15: 0.0,
             boot_time_unix,
+            cpu_time_split: winapi::CpuTimeSplit::new(),
+            cpu_user_frac: 0.7,
+            cpu_kernel_frac: 0.3,
+            gpu_collector: GpuCollector::new(),
         }
     }
 
@@ -76,7 +89,13 @@ impl Collector {
         // Refresh only what we need - much faster than refresh_all()
         self.sys.refresh_cpu_all();
         self.sys.refresh_memory();
-        self.sys.refresh_processes(ProcessesToUpdate::All, true);
+        // update_process_names: when false, skip re-fetching exe/name/command (expensive)
+        self.sys.refresh_processes(ProcessesToUpdate::All, app.update_process_names);
+
+        // Sample real CPU user/kernel split via GetSystemTimes
+        let (user_frac, kernel_frac) = self.cpu_time_split.sample();
+        self.cpu_user_frac = user_frac;
+        self.cpu_kernel_frac = kernel_frac;
 
         self.collect_cpu(app);
         self.collect_memory(app);
@@ -85,6 +104,10 @@ impl Collector {
         self.collect_uptime(app);
         self.compute_load_average(app);
 
+        // Pass CPU user/kernel split to app for header rendering
+        app.cpu_user_frac = self.cpu_user_frac;
+        app.cpu_kernel_frac = self.cpu_kernel_frac;
+
         app.collect_users();
         app.apply_filter();
         app.sort_processes();
@@ -92,6 +115,31 @@ impl Collector {
         // Rebuild tree AFTER sorting if tree view is active
         if app.tree_view {
             app.build_tree_view();
+        }
+
+        // ── Network connections (Net tab) ──
+        // Only collect when on the Net tab (avoid overhead otherwise)
+        if matches!(app.active_tab, crate::app::ProcessTab::Net) {
+            let pid_names: HashMap<u32, String> = app.processes.iter()
+                .map(|p| (p.pid, p.name.clone()))
+                .collect();
+            app.connections = netstat::fetch_connections(&pid_names);
+        }
+
+        // ── GPU per-process data (GPU tab) ──
+        if matches!(app.active_tab, crate::app::ProcessTab::Gpu) {
+            app.gpu_processes = self.gpu_collector.collect();
+            // Sort by GPU usage descending so busiest processes are at top
+            app.gpu_processes.sort_by(|a, b| b.gpu_usage.partial_cmp(&a.gpu_usage).unwrap_or(std::cmp::Ordering::Equal));
+
+            // Populate overall GPU stats for header meters
+            let info = &self.gpu_collector.adapter_info;
+            app.gpu_overall_usage = info.overall_usage;
+            app.gpu_dedicated_mem = info.total_dedicated_mem;
+            app.gpu_shared_mem = info.total_shared_mem;
+            if app.gpu_adapter_name.is_empty() {
+                app.gpu_adapter_name = crate::system::gpu::detect_gpu_adapter_name();
+            }
         }
 
         app.follow_process();
@@ -234,16 +282,22 @@ impl Collector {
             self.user_name_cache = winapi::batch_process_users(&all_pids);
         }
         self.win_data_cache_ticks += 1;
-        // Clone the cache to avoid borrow checker issues
-        let win_data = self.win_data_cache.clone();
 
         // I/O counters MUST be fetched every tick for accurate rate calculation
         let io_counters = winapi::batch_io_counters(&all_pids);
 
-        // User names resolved via Win32 API
-        let user_names = self.user_name_cache.clone();
+        // Batch-collect per-process CPU times for TIME+ sub-second precision
+        // Only every 3 ticks (aligned with win_data refresh) to save overhead
+        let process_times = if self.win_data_cache_ticks % 3 == 1 {
+            winapi::batch_process_times(&all_pids)
+        } else {
+            HashMap::new()
+        };
 
-        // Merge Win32 data into process list
+        // Build a set of current PIDs for dead PID cleanup
+        let current_pids: std::collections::HashSet<u32> = all_pids.iter().copied().collect();
+
+        // Merge Win32 data into process list — access caches by reference, no cloning
         let processes: Vec<ProcessInfo> = raw_procs.into_iter()
             .map(|(pid, ppid, name, command, sys_status, virt, resident, cpu_usage, mem_pct, run_time)| {
                 let status = match sys_status {
@@ -263,14 +317,18 @@ impl Collector {
                     }
                 };
 
-                let user_name = user_names.get(&pid).cloned().unwrap_or_else(|| "SYSTEM".to_string());
+                let user_name = self.user_name_cache.get(&pid).cloned().unwrap_or_else(|| "SYSTEM".to_string());
 
-                // Get Win32 data (priority, nice, thread count, I/O counters)
-                let wd = win_data.get(&pid);
+                // Get Win32 data (priority, nice, thread count)
+                let wd = self.win_data_cache.get(&pid);
                 let priority = wd.map(|d| d.priority).unwrap_or(8);
                 let nice = wd.map(|d| d.nice).unwrap_or(0);
                 let threads = wd.map(|d| d.thread_count).unwrap_or(1);
+                let private_ws = wd.map(|d| d.private_working_set).unwrap_or(0);
                 total_threads += threads as usize;
+
+                // shared_mem = resident (working set) - private working set
+                let shared_mem = resident.saturating_sub(private_ws);
 
                 // Calculate I/O rates based on difference from previous tick
                 let (io_read_bytes, io_write_bytes) = io_counters.get(&pid).copied().unwrap_or((0, 0));
@@ -292,6 +350,9 @@ impl Collector {
                 // Update prev counters for next tick
                 self.prev_io_counters.insert(pid, (io_read_bytes, io_write_bytes, now));
 
+                // Get high-precision CPU time for TIME+ display
+                let cpu_time_100ns = process_times.get(&pid).copied().unwrap_or(0);
+
                 ProcessInfo {
                     pid,
                     ppid,
@@ -303,25 +364,69 @@ impl Collector {
                     nice,
                     virtual_mem: virt,
                     resident_mem: resident,
-                    shared_mem: 0, // Not easily available on Windows
+                    shared_mem,
                     cpu_usage,
                     mem_usage: mem_pct,
                     run_time: run_time.min(uptime),
+                    cpu_time_100ns,
                     threads,
                     io_read_rate,
                     io_write_rate,
                     depth: 0,
                     is_last_child: false,
-                    tagged: false,
                 }
             })
             .collect();
 
-        app.total_tasks = processes.len();
+        // Clean up dead PIDs from prev_io_counters to prevent memory leak
+        self.prev_io_counters.retain(|pid, _| current_pids.contains(pid));
+
+        // If show_threads is enabled, enumerate individual threads and add as sub-entries
+        if app.show_threads {
+            let mut expanded = Vec::with_capacity(processes.len() * 2);
+            for proc in processes {
+                let pid = proc.pid;
+                let threads_info = winapi::enumerate_threads(pid, app.show_thread_names);
+                expanded.push(proc);
+                for ti in threads_info {
+                    let thread_name = if !ti.name.is_empty() {
+                        ti.name
+                    } else {
+                        format!("tid:{}", ti.thread_id)
+                    };
+                    expanded.push(ProcessInfo {
+                        pid: ti.thread_id,   // Use thread ID as PID for display
+                        ppid: pid,           // Parent is the owning process
+                        name: thread_name,
+                        command: String::new(),
+                        user: String::new(),
+                        status: ProcessStatus::Running,
+                        priority: ti.base_priority,
+                        nice: 0,
+                        virtual_mem: 0,
+                        resident_mem: 0,
+                        shared_mem: 0,
+                        cpu_usage: 0.0,
+                        mem_usage: 0.0,
+                        run_time: 0,
+                        cpu_time_100ns: 0,
+                        threads: 0,
+                        io_read_rate: 0.0,
+                        io_write_rate: 0.0,
+                        depth: 1,
+                        is_last_child: false,
+                    });
+                }
+            }
+            app.processes = expanded;
+        } else {
+            app.processes = processes;
+        }
+
+        app.total_tasks = app.processes.len();
         app.running_tasks = running;
         app.sleeping_tasks = sleeping;
         app.total_threads = total_threads;
-        app.processes = processes;
     }
 
     /// Calculate system uptime, using the real boot time from the Event Log

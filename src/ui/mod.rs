@@ -16,24 +16,74 @@ use ratatui::layout::{Constraint, Direction, Layout};
 
 use crate::app::{App, AppMode};
 
-/// Calculate the header height based on number of CPU cores (htop layout)
-pub fn header_height(app: &App) -> u16 {
+/// Minimum width (chars) for a single CPU bar column to remain readable
+const MIN_CPU_COL_WIDTH: u16 = 15;
+
+/// Calculate the optimal number of CPU columns based on core count and terminal size.
+/// Returns 2, 4, 8, or 16. Always even (left/right panel symmetry).
+/// htop-style: uses more columns when core count is high relative to terminal height,
+/// so the header never dominates the screen.
+pub fn cpu_column_count(core_count: usize, term_height: u16, term_width: u16) -> usize {
+    if core_count <= 1 {
+        return 2;
+    }
+
+    // Max header height ≈ 40% of terminal, but at least 6 rows
+    let max_header = ((term_height as usize) * 2 / 5).max(6);
+    let max_cpu_rows = max_header.saturating_sub(3); // 3 rows for info meters (Mem/Swap/Net or Tasks/Load/Uptime)
+    if max_cpu_rows == 0 {
+        return 2;
+    }
+
+    // Max columns that fit horizontally (each column needs MIN_CPU_COL_WIDTH chars)
+    let max_cols_by_width = (term_width / MIN_CPU_COL_WIDTH) as usize;
+    let max_cols_by_width = max_cols_by_width.max(2);
+
+    // Find smallest column count (powers of 2) where CPU rows fit
+    for &cols in &[2, 4, 8, 16] {
+        if cols > max_cols_by_width {
+            // Can't fit this many columns horizontally; use previous
+            break;
+        }
+        let rows_needed = (core_count + cols - 1) / cols;
+        if rows_needed <= max_cpu_rows {
+            return cols;
+        }
+    }
+
+    // Fallback: use maximum feasible column count
+    max_cols_by_width.min(16).max(2)
+}
+
+/// Calculate the header height based on number of CPU cores and terminal size.
+/// htop-style: each panel flows independently, so height = max(left, right).
+pub fn header_height(app: &App, term_height: u16, term_width: u16) -> u16 {
     if app.compact_mode {
         return 2; // 1 aggregate CPU bar + 1 Mem bar
     }
     let cores = app.cpu_info.cores.len();
+    if cores == 0 {
+        return 5; // fallback: just info rows
+    }
+    let cpu_cols = cpu_column_count(cores, term_height, term_width);
+    let sub_cols_per_panel = (cpu_cols / 2).max(1);
     let half = (cores + 1) / 2;
-    // Left column: half cores + Mem + Swap + Net
-    // Right column: other half cores + Tasks + Load + Uptime
-    let left_rows = half + 3; // +3 for Mem, Swap, Net
-    let right_rows = (cores - half) + 3;
-    left_rows.max(right_rows) as u16
+    let right_count = cores - half;
+    let left_cpu_rows = (half + sub_cols_per_panel - 1) / sub_cols_per_panel;
+    let right_cpu_rows = if right_count > 0 {
+        (right_count + sub_cols_per_panel - 1) / sub_cols_per_panel
+    } else {
+        0
+    };
+    let left_total = left_cpu_rows + 3; // Mem + Swap/GPU + Net/VMem
+    let right_total = right_cpu_rows + 3; // Tasks + Load + Uptime
+    left_total.max(right_total) as u16
 }
 
 /// Render the complete UI
 pub fn draw(f: &mut Frame, app: &App) {
     let size = f.area();
-    let h_height = header_height(app);
+    let h_height = header_height(app, size.height, size.width);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)

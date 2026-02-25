@@ -45,18 +45,28 @@ pub const IO_HEADERS: &[(&str, u16, ProcessSortField, u8)] = &[
     ("Command",     0,  ProcessSortField::Command,     100),
 ];
 
-/// Network tab column headers (pstop extension)
-/// PID USER  S  CPU%  IO_READ  IO_WRITE  TOTAL_IO  Command
+/// Network connections tab column headers (Net tab - real connections)
+/// These use ProcessSortField::Pid as a placeholder since connections aren't process-sorted.
+/// The Net tab has its own rendering path.
 pub const NET_HEADERS: &[(&str, u16, ProcessSortField, u8)] = &[
-    ("PID",        7,  ProcessSortField::Pid,          90),
-    ("USER",       9,  ProcessSortField::User,         80),
-    ("S",          2,  ProcessSortField::Status,       40),
-    ("CPU%",       6,  ProcessSortField::Cpu,          85),
-    ("IO READ",   10,  ProcessSortField::IoReadRate,   70),
-    ("IO WRITE",  10,  ProcessSortField::IoWriteRate,  65),
-    ("TOTAL IO",  10,  ProcessSortField::IoRate,       75),
-    ("MEM%",       6,  ProcessSortField::Mem,          60),
-    ("Command",    0,  ProcessSortField::Command,     100),
+    ("PID",       7,  ProcessSortField::Pid,         90),
+    ("Process",  15,  ProcessSortField::Command,    100),
+    ("Proto",     6,  ProcessSortField::Status,      80),
+    ("Local",    22,  ProcessSortField::User,        85),
+    ("Remote",   22,  ProcessSortField::Priority,    70),
+    ("State",    12,  ProcessSortField::Nice,        75),
+    ("Service",   0,  ProcessSortField::VirtMem,     60),
+];
+
+/// GPU tab column headers (per-process GPU usage)
+pub const GPU_HEADERS: &[(&str, u16, ProcessSortField, u8)] = &[
+    ("PID",        7,  ProcessSortField::Pid,         90),
+    ("Process",   15,  ProcessSortField::Command,    100),
+    ("GPU%",       7,  ProcessSortField::Cpu,         95),
+    ("Engine",    14,  ProcessSortField::Status,      80),
+    ("Ded.Mem",   10,  ProcessSortField::ResMem,      85),
+    ("Shr.Mem",   10,  ProcessSortField::SharedMem,   70),
+    ("Total",      0,  ProcessSortField::VirtMem,     60),
 ];
 
 /// Draw the process table
@@ -70,6 +80,7 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
         ProcessTab::Main => HEADERS,
         ProcessTab::Io => IO_HEADERS,
         ProcessTab::Net => NET_HEADERS,
+        ProcessTab::Gpu => GPU_HEADERS,
     };
 
     // --- Column header row (full-width colored background like htop) ---
@@ -163,27 +174,103 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let visible = proc_area.height as usize;
-    let start = app.scroll_offset;
-    let end = (start + visible).min(app.filtered_processes.len());
 
-    for (i, row_idx) in (start..end).enumerate() {
-        let proc = &app.filtered_processes[row_idx];
-        let is_selected = row_idx == app.selected_index;
-        let is_tagged = app.tagged_pids.contains(&proc.pid);
+    // ── Render rows based on active tab ──
+    match app.active_tab {
+        ProcessTab::Main | ProcessTab::Io => {
+            let start = app.scroll_offset;
+            let end = (start + visible).min(app.filtered_processes.len());
 
-        let row_area = Rect {
-            x: proc_area.x,
-            y: proc_area.y + i as u16,
-            width: proc_area.width,
-            height: 1,
-        };
+            for (i, row_idx) in (start..end).enumerate() {
+                let proc = &app.filtered_processes[row_idx];
+                let is_selected = row_idx == app.selected_index;
+                let is_tagged = app.tagged_pids.contains(&proc.pid);
 
-        let row_line = match app.active_tab {
-            ProcessTab::Main => build_process_row(proc, row_area.width as usize, app, is_selected, is_tagged, &display_cols),
-            ProcessTab::Io => build_io_row(proc, row_area.width as usize, app, is_selected, is_tagged, &display_cols),
-            ProcessTab::Net => build_net_row(proc, row_area.width as usize, app, is_selected, is_tagged, &display_cols),
-        };
-        f.render_widget(Paragraph::new(row_line), row_area);
+                let row_area = Rect {
+                    x: proc_area.x,
+                    y: proc_area.y + i as u16,
+                    width: proc_area.width,
+                    height: 1,
+                };
+
+                let row_line = match app.active_tab {
+                    ProcessTab::Main => build_process_row(proc, row_area.width as usize, app, is_selected, is_tagged, &display_cols),
+                    ProcessTab::Io => build_io_row(proc, row_area.width as usize, app, is_selected, is_tagged, &display_cols),
+                    _ => unreachable!(),
+                };
+                f.render_widget(Paragraph::new(row_line), row_area);
+            }
+        }
+
+        ProcessTab::Net => {
+            let start = app.net_scroll_offset;
+            let end = (start + visible).min(app.connections.len());
+
+            for (i, row_idx) in (start..end).enumerate() {
+                let conn = &app.connections[row_idx];
+                let is_selected = row_idx == app.net_selected_index;
+
+                let row_area = Rect {
+                    x: proc_area.x,
+                    y: proc_area.y + i as u16,
+                    width: proc_area.width,
+                    height: 1,
+                };
+
+                let row_line = build_net_conn_row(conn, row_area.width as usize, app, is_selected);
+                f.render_widget(Paragraph::new(row_line), row_area);
+            }
+
+            // If no connections, show a message
+            if app.connections.is_empty() {
+                let msg_area = Rect {
+                    x: proc_area.x,
+                    y: proc_area.y,
+                    width: proc_area.width,
+                    height: 1,
+                };
+                let msg = Line::from(Span::styled(
+                    "  No active network connections found (run as administrator for full view)",
+                    Style::default().fg(Color::DarkGray),
+                ));
+                f.render_widget(Paragraph::new(msg), msg_area);
+            }
+        }
+
+        ProcessTab::Gpu => {
+            let start = app.gpu_scroll_offset;
+            let end = (start + visible).min(app.gpu_processes.len());
+
+            for (i, row_idx) in (start..end).enumerate() {
+                let gpu_proc = &app.gpu_processes[row_idx];
+                let is_selected = row_idx == app.gpu_selected_index;
+
+                let row_area = Rect {
+                    x: proc_area.x,
+                    y: proc_area.y + i as u16,
+                    width: proc_area.width,
+                    height: 1,
+                };
+
+                let row_line = build_gpu_row(gpu_proc, row_area.width as usize, app, is_selected);
+                f.render_widget(Paragraph::new(row_line), row_area);
+            }
+
+            // If no GPU data, show a message
+            if app.gpu_processes.is_empty() {
+                let msg_area = Rect {
+                    x: proc_area.x,
+                    y: proc_area.y,
+                    width: proc_area.width,
+                    height: 1,
+                };
+                let msg = Line::from(Span::styled(
+                    "  No GPU data available (requires Windows 10 1709+ with WDDM 2.0+ GPU)",
+                    Style::default().fg(Color::DarkGray),
+                ));
+                f.render_widget(Paragraph::new(msg), msg_area);
+            }
+        }
     }
 
     // Search / Filter bar
@@ -286,26 +373,39 @@ fn build_process_row(
 ) -> Line<'static> {
     let cs = &app.color_scheme;
     let bg = if selected { cs.process_selected_bg } else { cs.process_bg };
-    let default_fg = if selected { cs.process_selected_fg } else { cs.process_fg };
 
-    let pid_fg = if tagged { Color::Yellow } else { cs.col_pid };
+    // shadow_other_users: dim processes owned by other users
+    let is_other_user = app.shadow_other_users
+        && !selected
+        && proc.user.to_lowercase() != app.current_user;
+    let default_fg = if is_other_user {
+        cs.process_shadow
+    } else if selected {
+        cs.process_selected_fg
+    } else {
+        cs.process_fg
+    };
 
-    let cpu_fg = if proc.cpu_usage > 90.0 { cs.col_cpu_high }
+    let pid_fg = if tagged { Color::Yellow } else if is_other_user { cs.process_shadow } else { cs.col_pid };
+
+    let cpu_fg = if is_other_user { cs.process_shadow }
+        else if proc.cpu_usage > 90.0 { cs.col_cpu_high }
         else if proc.cpu_usage > 50.0 { cs.col_cpu_medium }
         else { cs.col_cpu_low };
 
-    let mem_fg = if proc.mem_usage > 50.0 { cs.col_mem_high }
+    let mem_fg = if is_other_user { cs.process_shadow }
+        else if proc.mem_usage > 50.0 { cs.col_mem_high }
         else if proc.mem_usage > 20.0 { cs.col_cpu_medium }
         else { cs.col_mem_normal };
 
-    let status_fg = match &proc.status {
+    let status_fg = if is_other_user { cs.process_shadow } else { match &proc.status {
         crate::system::process::ProcessStatus::Running => cs.col_status_running,
         crate::system::process::ProcessStatus::Sleeping => cs.col_status_sleeping,
         crate::system::process::ProcessStatus::DiskSleep => cs.col_status_disk_sleep,
         crate::system::process::ProcessStatus::Stopped => cs.col_status_stopped,
         crate::system::process::ProcessStatus::Zombie => cs.col_status_zombie,
         crate::system::process::ProcessStatus::Unknown => cs.col_status_unknown,
-    };
+    }};
 
     // Tree prefix
     let tree_prefix = if app.tree_view && proc.depth > 0 {
@@ -323,10 +423,16 @@ fn build_process_row(
         String::new()
     };
 
-    // Command column: htop highlights the basename in bold/color
+    // Command column: show_merged_command merges name + full command
     let cmd_width = width.saturating_sub(fixed_cols_width_for(HEADERS, display_cols));
-    // 'p' toggle: show full command path or just the process name
-    let cmd_text = if app.show_full_path {
+    let cmd_text = if app.show_merged_command {
+        // Merged: "name command_args" (like htop's merged command)
+        if proc.command != proc.name && !proc.command.is_empty() {
+            format!("{} {}", proc.name, proc.command)
+        } else {
+            proc.name.clone()
+        }
+    } else if app.show_full_path {
         proc.command.clone()
     } else {
         proc.name.clone()
@@ -349,22 +455,31 @@ fn build_process_row(
         spans.push(Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)));
     }
     if display_cols.contains(&ProcessSortField::Ppid) {
-        spans.push(Span::styled(format!("{:>6} ", proc.ppid), base_style.fg(cs.col_pid)));
+        spans.push(Span::styled(format!("{:>6} ", proc.ppid), base_style.fg(if is_other_user { cs.process_shadow } else { cs.col_pid })));
     }
     if display_cols.contains(&ProcessSortField::User) {
-        spans.push(Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(cs.col_user)));
+        spans.push(Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(if is_other_user { cs.process_shadow } else { cs.col_user })));
     }
     if display_cols.contains(&ProcessSortField::Priority) {
-        spans.push(Span::styled(format!("{:>3} ", proc.priority), base_style.fg(cs.col_priority)));
+        spans.push(Span::styled(format!("{:>3} ", proc.priority), base_style.fg(if is_other_user { cs.process_shadow } else { cs.col_priority })));
     }
     if display_cols.contains(&ProcessSortField::Nice) {
         spans.push(Span::styled(format!("{:>3} ", proc.nice), base_style.fg(default_fg)));
     }
     if display_cols.contains(&ProcessSortField::VirtMem) {
-        spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.virtual_mem)), base_style.fg(cs.col_priority)));
+        // highlight_megabytes: color large memory values
+        let virt_fg = if is_other_user { cs.process_shadow }
+            else if app.highlight_megabytes && proc.virtual_mem >= 1024 * 1024 * 1024 { cs.col_mem_high }
+            else if app.highlight_megabytes && proc.virtual_mem >= 1024 * 1024 { cs.col_priority }
+            else { default_fg };
+        spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.virtual_mem)), base_style.fg(virt_fg)));
     }
     if display_cols.contains(&ProcessSortField::ResMem) {
-        spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.resident_mem)), base_style.fg(default_fg).add_modifier(Modifier::BOLD)));
+        let res_fg = if is_other_user { cs.process_shadow }
+            else if app.highlight_megabytes && proc.resident_mem >= 1024 * 1024 * 1024 { cs.col_mem_high }
+            else if app.highlight_megabytes && proc.resident_mem >= 1024 * 1024 { Color::Yellow }
+            else { default_fg };
+        spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.resident_mem)), base_style.fg(res_fg).add_modifier(Modifier::BOLD)));
     }
     if display_cols.contains(&ProcessSortField::SharedMem) {
         spans.push(Span::styled(format!("{:>6} ", format_bytes(proc.shared_mem)), base_style.fg(default_fg)));
@@ -382,133 +497,153 @@ fn build_process_row(
         spans.push(Span::styled(format!("{:>9} ", proc.format_time()), base_style.fg(default_fg)));
     }
     if display_cols.contains(&ProcessSortField::Threads) {
-        spans.push(Span::styled(format!("{:>3} ", proc.threads), base_style.fg(cs.col_priority)));
+        // highlight_threads: color thread count differently
+        let thr_fg = if is_other_user { cs.process_shadow }
+            else if app.highlight_threads && proc.threads > 10 { cs.col_thread }
+            else if app.highlight_threads { cs.col_priority }
+            else { cs.col_priority };
+        spans.push(Span::styled(format!("{:>3} ", proc.threads), base_style.fg(thr_fg)));
     }
     if display_cols.contains(&ProcessSortField::IoReadRate) {
-        spans.push(Span::styled(format!("{:>9} ", format_io_rate(proc.io_read_rate)), base_style.fg(Color::Yellow)));
+        spans.push(Span::styled(format!("{:>9} ", format_io_rate(proc.io_read_rate)), base_style.fg(if is_other_user { cs.process_shadow } else { Color::Yellow })));
     }
     if display_cols.contains(&ProcessSortField::IoWriteRate) {
-        spans.push(Span::styled(format!("{:>9} ", format_io_rate(proc.io_write_rate)), base_style.fg(Color::Magenta)));
+        spans.push(Span::styled(format!("{:>9} ", format_io_rate(proc.io_write_rate)), base_style.fg(if is_other_user { cs.process_shadow } else { Color::Magenta })));
     }
 
     // Command with basename highlighting (htop shows the process name in a different color)
     // Controlled by highlight_base_name display option
+    let cmd_fg = if is_other_user { cs.process_shadow } else { cs.col_command };
+    let cmd_base_fg = if is_other_user { cs.process_shadow } else { cs.col_command_basename };
     if app.highlight_base_name {
         if let Some(pos) = command_truncated.find(base_name.as_str()) {
             let before = &command_truncated[..pos];
             let name_part = &command_truncated[pos..pos + base_name.len().min(command_truncated.len() - pos)];
             let after = &command_truncated[pos + name_part.len()..];
             if !before.is_empty() {
-                spans.push(Span::styled(before.to_string(), base_style.fg(cs.col_command)));
+                spans.push(Span::styled(before.to_string(), base_style.fg(cmd_fg)));
             }
             spans.push(Span::styled(
                 name_part.to_string(),
-                base_style.fg(cs.col_command_basename).add_modifier(Modifier::BOLD),
+                base_style.fg(cmd_base_fg).add_modifier(Modifier::BOLD),
             ));
             if !after.is_empty() {
-                spans.push(Span::styled(after.to_string(), base_style.fg(cs.col_command)));
+                spans.push(Span::styled(after.to_string(), base_style.fg(cmd_fg)));
             }
         } else {
-            spans.push(Span::styled(command_truncated, base_style.fg(cs.col_command)));
+            spans.push(Span::styled(command_truncated, base_style.fg(cmd_fg)));
         }
     } else {
-        spans.push(Span::styled(command_truncated, base_style.fg(cs.col_command)));
+        spans.push(Span::styled(command_truncated, base_style.fg(cmd_fg)));
     }
 
     Line::from(spans)
 }
 
-/// Build a row for the Net tab view
-/// PID USER S CPU% IO_READ IO_WRITE TOTAL_IO MEM% Command
-fn build_net_row(
-    proc: &crate::system::process::ProcessInfo,
+/// Build a row for the Net tab (real network connections)
+/// PID  Process  Proto  Local  Remote  State  Service
+fn build_net_conn_row(
+    conn: &crate::system::netstat::NetConnection,
     width: usize,
     app: &App,
     selected: bool,
-    tagged: bool,
-    display_cols: &std::collections::HashSet<ProcessSortField>,
 ) -> Line<'static> {
     let cs = &app.color_scheme;
     let bg = if selected { cs.process_selected_bg } else { cs.process_bg };
-    let _default_fg = if selected { cs.process_selected_fg } else { cs.process_fg };
-    let pid_fg = if tagged { Color::Yellow } else { cs.col_pid };
     let base_style = Style::default().bg(bg);
+    let default_fg = if selected { cs.process_selected_fg } else { cs.process_fg };
 
-    let status_fg = match &proc.status {
-        crate::system::process::ProcessStatus::Running => cs.col_status_running,
-        crate::system::process::ProcessStatus::Sleeping => cs.col_status_sleeping,
-        _ => cs.col_status_unknown,
+    // State-based color
+    let state_fg = match conn.state {
+        Some(crate::system::netstat::TcpState::Established) => Color::Green,
+        Some(crate::system::netstat::TcpState::Listen) => Color::Cyan,
+        Some(crate::system::netstat::TcpState::TimeWait) | Some(crate::system::netstat::TcpState::CloseWait) => Color::Yellow,
+        Some(crate::system::netstat::TcpState::SynSent) | Some(crate::system::netstat::TcpState::SynReceived) => Color::Magenta,
+        None => Color::DarkGray, // UDP has no state
+        _ => default_fg,
     };
 
-    let cpu_fg = if proc.cpu_usage > 90.0 { cs.col_cpu_high }
-        else if proc.cpu_usage > 50.0 { cs.col_cpu_medium }
-        else { cs.col_cpu_low };
+    let proto_fg = match conn.proto {
+        crate::system::netstat::ConnProto::Tcp => Color::Cyan,
+        crate::system::netstat::ConnProto::Udp => Color::Yellow,
+    };
 
-    let mem_fg = if proc.mem_usage > 50.0 { cs.col_mem_high }
-        else if proc.mem_usage > 20.0 { cs.col_cpu_medium }
-        else { cs.col_mem_normal };
+    // Proto label with version
+    let is_v6 = conn.local_addr.is_ipv6();
+    let proto_str = format!("{}{}", conn.proto.label(), if is_v6 { "6" } else { "4" });
 
-    let read_fg = if proc.io_read_rate > 1_048_576.0 { Color::Red }
-        else if proc.io_read_rate > 1024.0 { Color::Yellow }
-        else { Color::White };
+    let local_str = conn.local_str();
+    let remote_str = conn.remote_str();
+    let state_str: &str = if let Some(s) = conn.state {
+        s.label()
+    } else {
+        "---"
+    };
+    let service = conn.service_label();
 
-    let write_fg = if proc.io_write_rate > 1_048_576.0 { Color::Red }
-        else if proc.io_write_rate > 1024.0 { Color::Magenta }
-        else { Color::White };
-
-    let combined = proc.io_read_rate + proc.io_write_rate;
-    let total_fg = if combined > 1_048_576.0 { Color::Red }
-        else if combined > 1024.0 { Color::Cyan }
-        else { Color::White };
-
-    let cmd_width = width.saturating_sub(fixed_cols_width_for(NET_HEADERS, display_cols));
-    let cmd_text = if app.show_full_path { proc.command.clone() } else { proc.name.clone() };
-    let command_truncated = truncate_str(&cmd_text, cmd_width);
-    let base_name = &proc.name;
+    // Fixed columns: PID(7) + Process(15) + Proto(6) + Local(22) + Remote(22) + State(12) = 84
+    let service_width = width.saturating_sub(84);
 
     let mut spans = Vec::new();
-    if display_cols.contains(&ProcessSortField::Pid) {
-        spans.push(Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)));
-    }
-    if display_cols.contains(&ProcessSortField::User) {
-        spans.push(Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(cs.col_user)));
-    }
-    if display_cols.contains(&ProcessSortField::Status) {
-        spans.push(Span::styled(format!("{} ", proc.status.symbol()), base_style.fg(status_fg)));
-    }
-    if display_cols.contains(&ProcessSortField::Cpu) {
-        spans.push(Span::styled(format!("{:>5.1} ", proc.cpu_usage), base_style.fg(cpu_fg)));
-    }
-    if display_cols.contains(&ProcessSortField::IoReadRate) {
-        spans.push(Span::styled(format!("{:>9} ", format_io_rate_io_tab(proc.io_read_rate)), base_style.fg(read_fg)));
-    }
-    if display_cols.contains(&ProcessSortField::IoWriteRate) {
-        spans.push(Span::styled(format!("{:>9} ", format_io_rate_io_tab(proc.io_write_rate)), base_style.fg(write_fg)));
-    }
-    if display_cols.contains(&ProcessSortField::IoRate) {
-        spans.push(Span::styled(format!("{:>9} ", format_io_rate_io_tab(combined)), base_style.fg(total_fg)));
-    }
-    if display_cols.contains(&ProcessSortField::Mem) {
-        spans.push(Span::styled(format!("{:>5.1} ", proc.mem_usage), base_style.fg(mem_fg)));
-    }
+    spans.push(Span::styled(format!("{:>6} ", conn.pid), base_style.fg(cs.col_pid)));
+    spans.push(Span::styled(format!("{:<14} ", truncate_str(&conn.process_name, 14)), base_style.fg(cs.col_command_basename).add_modifier(Modifier::BOLD)));
+    spans.push(Span::styled(format!("{:<5} ", proto_str), base_style.fg(proto_fg)));
+    spans.push(Span::styled(format!("{:<21} ", truncate_str(&local_str, 21)), base_style.fg(default_fg)));
+    spans.push(Span::styled(format!("{:<21} ", truncate_str(&remote_str, 21)), base_style.fg(default_fg)));
+    spans.push(Span::styled(format!("{:<11} ", state_str), base_style.fg(state_fg)));
+    spans.push(Span::styled(format!("{:<width$}", service, width = service_width), base_style.fg(Color::DarkGray)));
 
-    if let Some(pos) = command_truncated.find(base_name.as_str()) {
-        let before = &command_truncated[..pos];
-        let name_part = &command_truncated[pos..pos + base_name.len().min(command_truncated.len() - pos)];
-        let after = &command_truncated[pos + name_part.len()..];
-        if !before.is_empty() {
-            spans.push(Span::styled(before.to_string(), base_style.fg(cs.col_command)));
-        }
-        spans.push(Span::styled(
-            name_part.to_string(),
-            base_style.fg(cs.col_command_basename).add_modifier(Modifier::BOLD),
-        ));
-        if !after.is_empty() {
-            spans.push(Span::styled(after.to_string(), base_style.fg(cs.col_command)));
-        }
-    } else {
-        spans.push(Span::styled(command_truncated, base_style.fg(cs.col_command)));
-    }
+    Line::from(spans)
+}
+
+/// Build a row for the GPU tab (per-process GPU usage)
+/// PID  Process  GPU%  Engine  Ded.Mem  Shr.Mem  Total
+fn build_gpu_row(
+    gpu_proc: &crate::system::gpu::GpuProcessInfo,
+    width: usize,
+    app: &App,
+    selected: bool,
+) -> Line<'static> {
+    let cs = &app.color_scheme;
+    let bg = if selected { cs.process_selected_bg } else { cs.process_bg };
+    let base_style = Style::default().bg(bg);
+
+    // GPU usage color
+    let gpu_fg = if gpu_proc.gpu_usage > 80.0 { cs.col_cpu_high }
+        else if gpu_proc.gpu_usage > 30.0 { cs.col_cpu_medium }
+        else if gpu_proc.gpu_usage > 0.1 { Color::Green }
+        else { Color::DarkGray };
+
+    // Memory color
+    let ded_fg = if gpu_proc.dedicated_mem > 512 * 1024 * 1024 { Color::Red }
+        else if gpu_proc.dedicated_mem > 64 * 1024 * 1024 { Color::Yellow }
+        else { Color::White };
+
+    let shr_fg = if gpu_proc.shared_mem > 256 * 1024 * 1024 { Color::Magenta }
+        else if gpu_proc.shared_mem > 32 * 1024 * 1024 { Color::Cyan }
+        else { Color::White };
+
+    let total_mem = gpu_proc.dedicated_mem + gpu_proc.shared_mem;
+
+    // Look up process name from the process list
+    let proc_name = app.processes.iter()
+        .find(|p| p.pid == gpu_proc.pid)
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| format!("PID {}", gpu_proc.pid));
+
+    let engine_str = if gpu_proc.engine_type.is_empty() { "---" } else { &gpu_proc.engine_type };
+
+    // Fixed columns: PID(7) + Process(15) + GPU%(7) + Engine(14) + Ded.Mem(10) + Shr.Mem(10) = 63
+    let total_width = width.saturating_sub(63);
+
+    let mut spans = Vec::new();
+    spans.push(Span::styled(format!("{:>6} ", gpu_proc.pid), base_style.fg(cs.col_pid)));
+    spans.push(Span::styled(format!("{:<14} ", truncate_str(&proc_name, 14)), base_style.fg(cs.col_command_basename).add_modifier(Modifier::BOLD)));
+    spans.push(Span::styled(format!("{:>5.1}% ", gpu_proc.gpu_usage), base_style.fg(gpu_fg)));
+    spans.push(Span::styled(format!("{:<13} ", truncate_str(engine_str, 13)), base_style.fg(Color::Cyan)));
+    spans.push(Span::styled(format!("{:>9} ", format_bytes(gpu_proc.dedicated_mem)), base_style.fg(ded_fg)));
+    spans.push(Span::styled(format!("{:>9} ", format_bytes(gpu_proc.shared_mem)), base_style.fg(shr_fg)));
+    spans.push(Span::styled(format!("{:<width$}", format_bytes(total_mem), width = total_width), base_style.fg(Color::White)));
 
     Line::from(spans)
 }
@@ -580,36 +715,33 @@ fn build_io_row(
 ) -> Line<'static> {
     let cs = &app.color_scheme;
     let bg = if selected { cs.process_selected_bg } else { cs.process_bg };
-    let default_fg = if selected { cs.process_selected_fg } else { cs.process_fg };
 
-    let pid_fg = if tagged { Color::Yellow } else { cs.col_pid };
+    let is_other_user = app.shadow_other_users
+        && !selected
+        && proc.user.to_lowercase() != app.current_user;
+    let default_fg = if is_other_user { cs.process_shadow }
+        else if selected { cs.process_selected_fg }
+        else { cs.process_fg };
+
+    let pid_fg = if tagged { Color::Yellow } else if is_other_user { cs.process_shadow } else { cs.col_pid };
     let base_style = Style::default().bg(bg);
 
     // I/O rate colors
-    let read_fg = if proc.io_read_rate > 1024.0 * 1024.0 {
-        Color::Red
-    } else if proc.io_read_rate > 1024.0 {
-        Color::Yellow
-    } else {
-        Color::White
-    };
+    let read_fg = if is_other_user { cs.process_shadow }
+        else if proc.io_read_rate > 1024.0 * 1024.0 { Color::Red }
+        else if proc.io_read_rate > 1024.0 { Color::Yellow }
+        else { Color::White };
 
-    let write_fg = if proc.io_write_rate > 1024.0 * 1024.0 {
-        Color::Red
-    } else if proc.io_write_rate > 1024.0 {
-        Color::Magenta
-    } else {
-        Color::White
-    };
+    let write_fg = if is_other_user { cs.process_shadow }
+        else if proc.io_write_rate > 1024.0 * 1024.0 { Color::Red }
+        else if proc.io_write_rate > 1024.0 { Color::Magenta }
+        else { Color::White };
 
     let combined_rate = proc.io_read_rate + proc.io_write_rate;
-    let combined_fg = if combined_rate > 1024.0 * 1024.0 {
-        Color::Red
-    } else if combined_rate > 1024.0 {
-        Color::Cyan
-    } else {
-        Color::White
-    };
+    let combined_fg = if is_other_user { cs.process_shadow }
+        else if combined_rate > 1024.0 * 1024.0 { Color::Red }
+        else if combined_rate > 1024.0 { Color::Cyan }
+        else { Color::White };
 
     // SWPD%: approximated as 0 on Windows (swap per-process not easily available)
     // We show N/A for most processes, 0.0 otherwise
@@ -654,7 +786,7 @@ fn build_io_row(
         spans.push(Span::styled(format!("{:>6} ", proc.pid), base_style.fg(pid_fg)));
     }
     if display_cols.contains(&ProcessSortField::User) {
-        spans.push(Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(cs.col_user)));
+        spans.push(Span::styled(format!("{:<8} ", truncate_str(&proc.user, 8)), base_style.fg(if is_other_user { cs.process_shadow } else { cs.col_user })));
     }
     if display_cols.contains(&ProcessSortField::Priority) {
         spans.push(Span::styled(format!("{:<3} ", io_prio), base_style.fg(default_fg)));
@@ -669,29 +801,31 @@ fn build_io_row(
         spans.push(Span::styled(format!("{:>10} ", format_io_rate_io_tab(proc.io_write_rate)), base_style.fg(write_fg)));
     }
     if display_cols.contains(&ProcessSortField::Mem) {
-        spans.push(Span::styled(format!("{:>5} ", swpd_str), base_style.fg(cs.col_status_unknown)));
+        spans.push(Span::styled(format!("{:>5} ", swpd_str), base_style.fg(if is_other_user { cs.process_shadow } else { cs.col_status_unknown })));
     }
     if display_cols.contains(&ProcessSortField::Cpu) {
-        spans.push(Span::styled(format!("{:>5} ", iod_str), base_style.fg(cs.col_status_unknown)));
+        spans.push(Span::styled(format!("{:>5} ", iod_str), base_style.fg(if is_other_user { cs.process_shadow } else { cs.col_status_unknown })));
     }
 
     // Command with basename highlighting
+    let cmd_fg = if is_other_user { cs.process_shadow } else { cs.col_command };
+    let cmd_base_fg = if is_other_user { cs.process_shadow } else { cs.col_command_basename };
     if let Some(pos) = command_truncated.find(base_name.as_str()) {
         let before = &command_truncated[..pos];
         let name_part = &command_truncated[pos..pos + base_name.len().min(command_truncated.len() - pos)];
         let after = &command_truncated[pos + name_part.len()..];
         if !before.is_empty() {
-            spans.push(Span::styled(before.to_string(), base_style.fg(cs.col_command)));
+            spans.push(Span::styled(before.to_string(), base_style.fg(cmd_fg)));
         }
         spans.push(Span::styled(
             name_part.to_string(),
-            base_style.fg(cs.col_command_basename).add_modifier(Modifier::BOLD),
+            base_style.fg(cmd_base_fg).add_modifier(Modifier::BOLD),
         ));
         if !after.is_empty() {
-            spans.push(Span::styled(after.to_string(), base_style.fg(cs.col_command)));
+            spans.push(Span::styled(after.to_string(), base_style.fg(cmd_fg)));
         }
     } else {
-        spans.push(Span::styled(command_truncated, base_style.fg(cs.col_command)));
+        spans.push(Span::styled(command_truncated, base_style.fg(cmd_fg)));
     }
 
     Line::from(spans)

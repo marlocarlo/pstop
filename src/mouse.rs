@@ -3,7 +3,7 @@ use crossterm::event::{MouseEvent, MouseEventKind, MouseButton};
 use crate::app::{App, AppMode, ProcessTab};
 use crate::system::process::ProcessSortField;
 use crate::ui;
-use crate::ui::process_table::{HEADERS, IO_HEADERS, compute_display_columns};
+use crate::ui::process_table::{HEADERS, IO_HEADERS, NET_HEADERS, GPU_HEADERS, compute_display_columns};
 
 /// Handle a mouse event.
 /// Requires the terminal size (columns, rows) to compute layout areas.
@@ -62,9 +62,9 @@ fn handle_tab_bar_click(app: &mut App, x: u16) {
         app.active_tab = ProcessTab::Main;
     } else if (8..13).contains(&x) {
         app.active_tab = ProcessTab::Io;
-    } else if (14..18).contains(&x) {
+    } else if (14..19).contains(&x) {
         app.active_tab = ProcessTab::Net;
-    } else if (19..24).contains(&x) {
+    } else if (20..25).contains(&x) {
         app.active_tab = ProcessTab::Gpu;
     }
 }
@@ -72,15 +72,11 @@ fn handle_tab_bar_click(app: &mut App, x: u16) {
 // ── Header click (sort by column) ───────────────────────────────────
 
 fn handle_header_click(app: &mut App, x: u16, term_width: u16) {
-    // Net and GPU tabs don't support column-click sorting (different data model)
-    if matches!(app.active_tab, ProcessTab::Net | ProcessTab::Gpu) {
-        return;
-    }
-
     let headers = match app.active_tab {
         ProcessTab::Main => HEADERS,
         ProcessTab::Io   => IO_HEADERS,
-        _ => return,
+        ProcessTab::Net  => NET_HEADERS,
+        ProcessTab::Gpu  => GPU_HEADERS,
     };
 
     // Compute display columns (same logic as rendering, so clicks match)
@@ -88,7 +84,8 @@ fn handle_header_click(app: &mut App, x: u16, term_width: u16) {
         ProcessTab::Main => app.visible_columns.clone(),
         _ => headers.iter().map(|(_, _, f, _)| *f).collect(),
     };
-    let display_cols = compute_display_columns(headers, &base_visible, term_width, app.sort_field);
+    let sort_field = app.active_sort_field();
+    let display_cols = compute_display_columns(headers, &base_visible, term_width, sort_field);
 
     // Compute column boundaries, respecting auto-hidden columns
     let mut cursor: u16 = 0;
@@ -119,10 +116,26 @@ fn handle_header_click(app: &mut App, x: u16, term_width: u16) {
 
 fn handle_row_click(app: &mut App, y: u16, data_start_y: u16) {
     let row_offset = (y - data_start_y) as usize;
-    let target_index = app.scroll_offset + row_offset;
 
-    if target_index < app.filtered_processes.len() {
-        app.selected_index = target_index;
+    match app.active_tab {
+        ProcessTab::Main | ProcessTab::Io => {
+            let target_index = app.scroll_offset + row_offset;
+            if target_index < app.filtered_processes.len() {
+                app.selected_index = target_index;
+            }
+        }
+        ProcessTab::Net => {
+            let target_index = app.net_scroll_offset + row_offset;
+            if target_index < app.net_processes.len() {
+                app.net_selected_index = target_index;
+            }
+        }
+        ProcessTab::Gpu => {
+            let target_index = app.gpu_scroll_offset + row_offset;
+            if target_index < app.gpu_processes.len() {
+                app.gpu_selected_index = target_index;
+            }
+        }
     }
 }
 
@@ -195,7 +208,7 @@ fn execute_fkey_action(app: &mut App, action: FkeyAction) {
             }
         }
         FkeyAction::SortBy => {
-            app.sort_menu_index = app.sort_field.index();
+            app.sort_menu_index = app.active_sort_field().index();
             app.mode = AppMode::SortSelect;
         }
         FkeyAction::NiceMinus => {

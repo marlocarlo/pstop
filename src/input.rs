@@ -94,7 +94,7 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
 
         // ── F6 — sort menu ──
         KeyCode::F(6) => {
-            app.sort_menu_index = app.sort_field.index();
+            app.sort_menu_index = app.active_sort_field().index();
             app.sort_scroll_offset = 0;
             // Ensure current selection is visible
             if app.sort_menu_index >= 10 {
@@ -110,7 +110,13 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Char('M') => app.set_sort_field(ProcessSortField::Mem),
         KeyCode::Char('T') => app.set_sort_field(ProcessSortField::Time),
         KeyCode::Char('N') => app.set_sort_field(ProcessSortField::Pid),
-        KeyCode::Char('I') => app.sort_ascending = !app.sort_ascending,
+        KeyCode::Char('I') => {
+            match app.active_tab {
+                ProcessTab::Main | ProcessTab::Io => app.sort_ascending = !app.sort_ascending,
+                ProcessTab::Net => { app.net_sort_ascending = !app.net_sort_ascending; app.sort_net_processes(); }
+                ProcessTab::Gpu => { app.gpu_sort_ascending = !app.gpu_sort_ascending; app.sort_gpu_processes(); }
+            }
+        }
 
         // ── F7 — Nice - (raise priority / lower nice) ──
         KeyCode::F(7) => {
@@ -724,14 +730,24 @@ fn kill_process_with_signal(pid: u32, signal_index: usize) {
     }
 }
 
-/// Cycle through sort fields
+/// Cycle through sort fields (tab-aware: uses header fields for current tab)
 fn cycle_sort_field(app: &mut App, forward: bool) {
-    let fields = ProcessSortField::all();
-    let current_idx = fields.iter().position(|f| *f == app.sort_field).unwrap_or(0);
+    use crate::ui::process_table::{HEADERS, IO_HEADERS, NET_HEADERS, GPU_HEADERS};
+    use crate::app::ProcessTab;
+
+    let headers: &[(&str, u16, ProcessSortField, u8)] = match app.active_tab {
+        ProcessTab::Main => HEADERS,
+        ProcessTab::Io   => IO_HEADERS,
+        ProcessTab::Net  => NET_HEADERS,
+        ProcessTab::Gpu  => GPU_HEADERS,
+    };
+    let fields: Vec<ProcessSortField> = headers.iter().map(|(_, _, f, _)| *f).collect();
+    let current = app.active_sort_field();
+    let current_idx = fields.iter().position(|f| *f == current).unwrap_or(0);
     let new_idx = if forward {
         (current_idx + 1) % fields.len()
     } else {
         if current_idx == 0 { fields.len() - 1 } else { current_idx - 1 }
     };
-    app.sort_field = fields[new_idx];
+    app.set_sort_field(fields[new_idx]);
 }

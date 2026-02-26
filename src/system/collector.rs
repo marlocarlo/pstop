@@ -123,7 +123,7 @@ impl Collector {
             let conn_counts = netstat::count_connections_per_pid();
 
             // Build ProcessNetBandwidth by matching connection PIDs to process I/O rates
-            let mut net_procs: Vec<netstat::ProcessNetBandwidth> = conn_counts
+            let net_procs: Vec<netstat::ProcessNetBandwidth> = conn_counts
                 .into_iter()
                 .map(|(pid, count)| {
                     let (name, recv, send) = app.processes.iter()
@@ -143,23 +143,16 @@ impl Collector {
                 })
                 .collect();
 
-            // Sort: highest total bandwidth first, then by connection count
-            net_procs.sort_by(|a, b| {
-                let ar = a.recv_bytes_per_sec + a.send_bytes_per_sec;
-                let br = b.recv_bytes_per_sec + b.send_bytes_per_sec;
-                br.partial_cmp(&ar)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-                    .then_with(|| b.connection_count.cmp(&a.connection_count))
-            });
-
+            // Sort by user's selected Net sort field
             app.net_processes = net_procs;
+            app.sort_net_processes();
         }
 
         // ── GPU per-process data (GPU tab) ──
         if matches!(app.active_tab, crate::app::ProcessTab::Gpu) {
             app.gpu_processes = self.gpu_collector.collect();
-            // Sort by GPU usage descending so busiest processes are at top
-            app.gpu_processes.sort_by(|a, b| b.gpu_usage.partial_cmp(&a.gpu_usage).unwrap_or(std::cmp::Ordering::Equal));
+            // Sort by user's selected GPU sort field
+            app.sort_gpu_processes();
 
             // Populate overall GPU stats for header meters
             let info = &self.gpu_collector.adapter_info;

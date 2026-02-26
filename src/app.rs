@@ -69,11 +69,19 @@ pub struct App {
     pub scroll_offset: usize,
     pub visible_rows: usize,
 
-    // Sorting
+    // Sorting (Main/IO tab)
     pub sort_field: ProcessSortField,
     pub sort_ascending: bool,
     pub sort_menu_index: usize,
     pub sort_scroll_offset: usize,
+
+    // Sorting (Net tab)
+    pub net_sort_field: ProcessSortField,
+    pub net_sort_ascending: bool,
+
+    // Sorting (GPU tab)
+    pub gpu_sort_field: ProcessSortField,
+    pub gpu_sort_ascending: bool,
 
     // Search (F3) — transient, doesn't filter
     pub search_query: String,
@@ -209,6 +217,12 @@ impl App {
             sort_ascending: false,
             sort_menu_index: 9,
             sort_scroll_offset: 0,
+
+            net_sort_field: ProcessSortField::IoReadRate,  // Download by default
+            net_sort_ascending: false,
+
+            gpu_sort_field: ProcessSortField::Cpu,  // GPU% by default
+            gpu_sort_ascending: false,
 
             search_query: String::new(),
             search_not_found: false,
@@ -635,14 +649,105 @@ impl App {
         self.filtered_processes.get(self.selected_index)
     }
 
-    /// Toggle sort field (cycle through or set specific)
-    pub fn set_sort_field(&mut self, field: ProcessSortField) {
-        if self.sort_field == field {
-            self.sort_ascending = !self.sort_ascending;
-        } else {
-            self.sort_field = field;
-            self.sort_ascending = false;
+    /// Get the active sort field for the current tab
+    pub fn active_sort_field(&self) -> ProcessSortField {
+        match self.active_tab {
+            ProcessTab::Main | ProcessTab::Io => self.sort_field,
+            ProcessTab::Net => self.net_sort_field,
+            ProcessTab::Gpu => self.gpu_sort_field,
         }
+    }
+
+    /// Get the active sort ascending for the current tab
+    pub fn active_sort_ascending(&self) -> bool {
+        match self.active_tab {
+            ProcessTab::Main | ProcessTab::Io => self.sort_ascending,
+            ProcessTab::Net => self.net_sort_ascending,
+            ProcessTab::Gpu => self.gpu_sort_ascending,
+        }
+    }
+
+    /// Toggle sort field for the current tab (cycle through or set specific)
+    pub fn set_sort_field(&mut self, field: ProcessSortField) {
+        match self.active_tab {
+            ProcessTab::Main | ProcessTab::Io => {
+                if self.sort_field == field {
+                    self.sort_ascending = !self.sort_ascending;
+                } else {
+                    self.sort_field = field;
+                    self.sort_ascending = false;
+                }
+            }
+            ProcessTab::Net => {
+                if self.net_sort_field == field {
+                    self.net_sort_ascending = !self.net_sort_ascending;
+                } else {
+                    self.net_sort_field = field;
+                    self.net_sort_ascending = false;
+                }
+                self.sort_net_processes();
+            }
+            ProcessTab::Gpu => {
+                if self.gpu_sort_field == field {
+                    self.gpu_sort_ascending = !self.gpu_sort_ascending;
+                } else {
+                    self.gpu_sort_field = field;
+                    self.gpu_sort_ascending = false;
+                }
+                self.sort_gpu_processes();
+            }
+        }
+    }
+
+    /// Sort Net tab data by current net_sort_field
+    pub fn sort_net_processes(&mut self) {
+        let ascending = self.net_sort_ascending;
+        let field = self.net_sort_field;
+
+        self.net_processes.sort_by(|a, b| {
+            let ord = match field {
+                ProcessSortField::Pid => a.pid.cmp(&b.pid),
+                ProcessSortField::Command => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                ProcessSortField::IoReadRate => a.recv_bytes_per_sec.partial_cmp(&b.recv_bytes_per_sec).unwrap_or(std::cmp::Ordering::Equal),
+                ProcessSortField::IoWriteRate => a.send_bytes_per_sec.partial_cmp(&b.send_bytes_per_sec).unwrap_or(std::cmp::Ordering::Equal),
+                ProcessSortField::Nice => a.connection_count.cmp(&b.connection_count),
+                // Default: sort by total bandwidth
+                _ => {
+                    let a_total = a.recv_bytes_per_sec + a.send_bytes_per_sec;
+                    let b_total = b.recv_bytes_per_sec + b.send_bytes_per_sec;
+                    a_total.partial_cmp(&b_total).unwrap_or(std::cmp::Ordering::Equal)
+                }
+            };
+            if ascending { ord } else { ord.reverse() }
+        });
+    }
+
+    /// Sort GPU tab data by current gpu_sort_field
+    pub fn sort_gpu_processes(&mut self) {
+        let ascending = self.gpu_sort_ascending;
+        let field = self.gpu_sort_field;
+
+        self.gpu_processes.sort_by(|a, b| {
+            let ord = match field {
+                ProcessSortField::Pid => a.pid.cmp(&b.pid),
+                ProcessSortField::Command => {
+                    // Need process names — use pid comparison as fallback
+                    a.pid.cmp(&b.pid)
+                }
+                ProcessSortField::Cpu => a.gpu_usage.partial_cmp(&b.gpu_usage).unwrap_or(std::cmp::Ordering::Equal),
+                ProcessSortField::Status => a.engine_type.cmp(&b.engine_type),
+                ProcessSortField::ResMem => a.dedicated_mem.cmp(&b.dedicated_mem),
+                ProcessSortField::SharedMem => a.shared_mem.cmp(&b.shared_mem),
+                ProcessSortField::VirtMem => {
+                    let a_total = a.dedicated_mem + a.shared_mem;
+                    let b_total = b.dedicated_mem + b.shared_mem;
+                    a_total.cmp(&b_total)
+                }
+                // Default: sort by GPU usage
+                _ => a.gpu_usage.partial_cmp(&b.gpu_usage).unwrap_or(std::cmp::Ordering::Equal),
+            };
+            if ascending { ord } else { ord.reverse() }
+        });
     }
 
     /// Toggle tag on selected process

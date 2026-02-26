@@ -96,7 +96,9 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
         ProcessTab::Main => app.visible_columns.clone(),
         _ => headers.iter().map(|(_, _, f, _)| *f).collect(),
     };
-    let display_cols = compute_display_columns(headers, &base_visible, area.width, app.sort_field);
+    let active_sort = app.active_sort_field();
+    let active_ascending = app.active_sort_ascending();
+    let display_cols = compute_display_columns(headers, &base_visible, area.width, active_sort);
 
     // Build header spans with sort indicator
     let mut header_spans: Vec<Span> = Vec::new();
@@ -106,12 +108,12 @@ pub fn draw_process_table(f: &mut Frame, app: &App, area: Rect) {
             continue;
         }
         
-        let is_sorted = *sort_field == app.sort_field;
+        let is_sorted = *sort_field == active_sort;
         let fixed_w = fixed_cols_width_for(headers, &display_cols);
         let w = if *width == 0 { (area.width as usize).saturating_sub(fixed_w) } else { *width as usize };
 
         let display = if is_sorted {
-            let arrow = if app.sort_ascending { "▲" } else { "▼" };
+            let arrow = if active_ascending { "▲" } else { "▼" };
             format!("{}{}", name, arrow)
         } else {
             name.to_string()

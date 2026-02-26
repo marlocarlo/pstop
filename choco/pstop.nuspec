@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
     <id>pstop</id>
-    <version>0.3.0</version>
+    <version>0.3.1</version>
     <title>pstop - htop for Windows</title>
     <authors>marlocarlo</authors>
     <owners>marlocarlo</owners>

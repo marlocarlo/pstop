@@ -13,10 +13,10 @@ use crate::system::memory::format_bytes;
 /// after the last CPU bar in that column, NOT force-aligned across panels.
 ///
 /// LEFT COLUMN (50%):            RIGHT COLUMN (50%):
-///   0 [||||     25.3%]            4 [||||||     42.1%]
-///   1 [||||||   43.2%]            5 [||||       30.0%]
-///   2 [|||      18.0%]            6 [|||||      35.2%]
-///   3 [|||||    33.0%]            7 [|||        22.1%]
+///     0[||||       25.3%]           4[||||||       42.1%]
+///     1[||||||     43.2%]           5[||||         30.0%]
+///     2[|||        18.0%]           6[|||||        35.2%]
+///     3[|||||      33.0%]           7[|||          22.1%]
 ///   Mem[||||used|||cache|    5.2G/16.0G]    Tasks: 312, 1024 thr; 5 running
 ///   Swp[||               0.8G/8.0G]         Load average: 0.28 0.45 0.47
 ///   Net[||||rx|||tx| 1.2M/s↓ 340K/s↑]      Uptime: 05:12:01
@@ -38,13 +38,14 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // header_margin: add horizontal padding when enabled
+    // header_margin: add horizontal AND vertical padding when enabled
+    // htop uses pad=2 → 1 row top + 1 row bottom, 1 col left + 1 col right
     let content_area = if app.header_margin {
         Rect {
             x: area.x + 1,
-            y: area.y,
+            y: area.y + 1,
             width: area.width.saturating_sub(2),
-            height: area.height,
+            height: area.height.saturating_sub(2),
         }
     } else {
         area
@@ -92,15 +93,24 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let left_total = left_cpu_rows + left_info_count;
     let right_total = right_cpu_rows + right_info_count;
 
-    // Split into left and right panels (50/50)
-    let panels = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(content_area);
+    // Split into left and right panels with 1-char separator (htop style)
+    let half_w = content_area.width / 2;
+    let left_panel = Rect {
+        x: content_area.x,
+        y: content_area.y,
+        width: half_w,
+        height: content_area.height,
+    };
+    let right_panel = Rect {
+        x: content_area.x + half_w + 1,
+        y: content_area.y,
+        width: content_area.width.saturating_sub(half_w + 1),
+        height: content_area.height,
+    };
 
     // --- LEFT PANEL ---
     {
-        let panel = panels[0];
+        let panel = left_panel;
         let row_constraints: Vec<Constraint> = (0..left_total)
             .map(|_| Constraint::Length(1))
             .collect();
@@ -162,7 +172,7 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
 
     // --- RIGHT PANEL ---
     {
-        let panel = panels[1];
+        let panel = right_panel;
         let row_constraints: Vec<Constraint> = (0..right_total)
             .map(|_| Constraint::Length(1))
             .collect();
@@ -231,96 +241,152 @@ fn draw_compact_header(f: &mut Frame, app: &App, area: Rect) {
         cores.iter().map(|c| c.usage_percent as f64).sum::<f64>() / cores.len() as f64
     };
     let cs = &app.color_scheme;
-    let label = format!("CPU[{}]", cores.len());
-    let pct_label = format!("{:>5.1}%", avg_usage);
-    let bar_width = rows[0].width as usize;
-    let available = bar_width.saturating_sub(label.len() + pct_label.len() + 3);
-    let total_filled = ((avg_usage / 100.0) * available as f64) as usize;
-    let total_filled = total_filled.min(available);
-    // Use real user/kernel split when detailed_cpu_time is on
-    let (green_portion, red_portion) = if app.detailed_cpu_time {
+    let usage_frac = avg_usage / 100.0;
+    let text = format!("{:.1}%", avg_usage);
+    let (user_frac_bar, kernel_frac_bar) = if app.detailed_cpu_time {
         let total = app.cpu_user_frac + app.cpu_kernel_frac;
         if total > 0.0 {
-            let u = (app.cpu_user_frac / total * total_filled as f64) as usize;
-            let k = total_filled.saturating_sub(u);
-            (u, k)
+            (app.cpu_user_frac / total * usage_frac, app.cpu_kernel_frac / total * usage_frac)
         } else {
-            (total_filled, 0)
+            (usage_frac, 0.0)
         }
     } else {
-        let g = (total_filled as f64 * 0.7) as usize;
-        (g, total_filled.saturating_sub(g))
+        (usage_frac * 0.7, usage_frac * 0.3)
     };
-    let empty = available.saturating_sub(total_filled);
-    let line = Line::from(vec![
-        Span::styled(&label, Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD)),
-        Span::styled("[", Style::default().fg(cs.cpu_label)),
-        Span::styled("|".repeat(green_portion), Style::default().fg(cs.cpu_bar_normal)),
-        Span::styled("|".repeat(red_portion), Style::default().fg(cs.cpu_bar_system)),
-        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
-        Span::styled("]", Style::default().fg(cs.cpu_label)),
-        Span::styled(pct_label, Style::default().fg(cs.cpu_label)),
-    ]);
-    f.render_widget(Paragraph::new(line), rows[0]);
+    draw_htop_bar(
+        f,
+        "CPU",
+        &[(user_frac_bar, cs.cpu_bar_normal), (kernel_frac_bar, cs.cpu_bar_system)],
+        &text,
+        cs.cpu_label,
+        cs.cpu_bar_bg,
+        rows[0],
+    );
 
     // Memory bar (reuse existing logic inline for compactness)
     draw_memory_bar(f, app, rows[1]);
 }
 
+/// Render an htop-style bar meter: `Cap[||||||||       text]`
+/// Text is right-aligned inside the brackets; bar fills from left, only in spaces.
+/// Characters in the filled area get the segment color; empty area gets shadow color.
+fn draw_htop_bar(
+    f: &mut Frame,
+    caption: &str,
+    segments: &[(f64, Color)],
+    text: &str,
+    label_color: Color,
+    shadow_color: Color,
+    area: Rect,
+) {
+    let w = area.width as usize;
+    if w == 0 {
+        return;
+    }
+    let cap_len = caption.len();
+    if w <= cap_len + 2 {
+        return;
+    }
+    let inner_w = w - cap_len - 2;
+
+    // Build character buffer (all spaces initially)
+    let mut chars: Vec<char> = vec![' '; inner_w];
+    let mut colors: Vec<Color> = vec![shadow_color; inner_w];
+
+    // Place text right-aligned inside the bar area
+    let text_chars: Vec<char> = text.chars().collect();
+    let text_len = text_chars.len().min(inner_w);
+    let text_start = inner_w.saturating_sub(text_len);
+    let text_offset = if text_chars.len() > inner_w {
+        text_chars.len() - inner_w
+    } else {
+        0
+    };
+    for i in 0..text_len {
+        chars[text_start + i] = text_chars[text_offset + i];
+        colors[text_start + i] = label_color;
+    }
+
+    // Fill bar segments from left; only replace space chars with '|'
+    let mut offset = 0;
+    for &(frac, color) in segments {
+        let fill = (frac * inner_w as f64).round() as usize;
+        let fill = fill.min(inner_w.saturating_sub(offset));
+        for i in offset..offset + fill {
+            if chars[i] == ' ' {
+                chars[i] = '|';
+            }
+            colors[i] = color;
+        }
+        offset += fill;
+    }
+
+    // Group consecutive characters with same color into spans
+    let mut spans = vec![
+        Span::styled(
+            caption.to_string(),
+            Style::default().fg(label_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("[", Style::default().fg(label_color)),
+    ];
+
+    if inner_w > 0 {
+        let mut run = String::new();
+        let mut run_color = colors[0];
+        for i in 0..inner_w {
+            if colors[i] == run_color {
+                run.push(chars[i]);
+            } else {
+                spans.push(Span::styled(run.clone(), Style::default().fg(run_color)));
+                run.clear();
+                run_color = colors[i];
+                run.push(chars[i]);
+            }
+        }
+        if !run.is_empty() {
+            spans.push(Span::styled(run, Style::default().fg(run_color)));
+        }
+    }
+
+    spans.push(Span::styled("]", Style::default().fg(label_color)));
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
 /// Draw a single CPU core usage bar with htop's multi-color scheme:
 ///   Green  = normal (user) processes
 ///   Red    = kernel / system processes
-///   Blue   = low priority (nice > 0)
-///   Cyan   = steal / virtualization overhead
 ///
 /// When detailed_cpu_time is ON, uses real GetSystemTimes data for user/kernel split.
 /// When OFF, uses a 70/30 visual approximation.
 fn draw_cpu_bar(f: &mut Frame, core: &crate::system::cpu::CpuCore, area: Rect, cs: &crate::color_scheme::ColorScheme, cpu_from_zero: bool, user_frac: f64, kernel_frac: f64, detailed: bool) {
     let usage = core.usage_percent;
     let display_id = if cpu_from_zero { core.id } else { core.id + 1 };
-    let label = format!("{:>2}", display_id);
-    let pct_label = format!("{:>5.1}%", usage);
+    let caption = format!("{:>3}", display_id);
+    let text = format!("{:.1}%", usage);
 
-    let bar_width = area.width as usize;
-    let prefix_len = label.len() + 1;
-    let suffix_len = pct_label.len() + 1;
-    let bracket_len = 2;
-    let available = bar_width.saturating_sub(prefix_len + suffix_len + bracket_len);
+    let usage_frac = usage as f64 / 100.0;
 
-    let total_filled = ((usage as f64 / 100.0) * available as f64) as usize;
-    let total_filled = total_filled.min(available);
-
-    // Use real user/kernel split from GetSystemTimes when detailed_cpu_time is on
-    let (user_portion, kernel_portion) = if detailed {
+    // Compute user/kernel split
+    let (user_frac_bar, kernel_frac_bar) = if detailed {
         let total = user_frac + kernel_frac;
         if total > 0.0 {
-            let u = (user_frac / total * total_filled as f64) as usize;
-            let k = total_filled.saturating_sub(u);
-            (u, k)
+            (user_frac / total * usage_frac, kernel_frac / total * usage_frac)
         } else {
-            (total_filled, 0)
+            (usage_frac, 0.0)
         }
     } else {
-        let green_portion = (total_filled as f64 * 0.7) as usize;
-        let red_portion = total_filled.saturating_sub(green_portion);
-        (green_portion, red_portion)
+        (usage_frac * 0.7, usage_frac * 0.3)
     };
-    let empty = available.saturating_sub(total_filled);
 
-    let line = Line::from(vec![
-        Span::styled(
-            format!("{} ", label),
-            Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("[", Style::default().fg(cs.cpu_label)),
-        Span::styled("|".repeat(user_portion), Style::default().fg(cs.cpu_bar_normal)),
-        Span::styled("|".repeat(kernel_portion), Style::default().fg(cs.cpu_bar_system)),
-        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
-        Span::styled("]", Style::default().fg(cs.cpu_label)),
-        Span::styled(pct_label, Style::default().fg(cs.cpu_label)),
-    ]);
-
-    f.render_widget(Paragraph::new(line), area);
+    draw_htop_bar(
+        f,
+        &caption,
+        &[(user_frac_bar, cs.cpu_bar_normal), (kernel_frac_bar, cs.cpu_bar_system)],
+        &text,
+        cs.cpu_label,
+        cs.cpu_bar_bg,
+        area,
+    );
 }
 
 /// Draw the memory usage bar with htop's multi-color scheme:
@@ -341,31 +407,17 @@ fn draw_memory_bar(f: &mut Frame, app: &App, area: Rect) {
 
     let used_str = format_bytes(mem.used_mem);
     let total_str = format_bytes(mem.total_mem);
-    let suffix = format!("{}/{}", used_str, total_str);
+    let text = format!("{}/{}", used_str, total_str);
 
-    let prefix = "Mem";
-    let bar_width = area.width as usize;
-    let bracket_len = 2;
-    let available = bar_width.saturating_sub(prefix.len() + suffix.len() + bracket_len + 1);
-
-    let green_len = ((used_frac) * available as f64) as usize;
-    let blue_len = ((buffer_frac) * available as f64) as usize;
-    let yellow_len = ((cache_frac) * available as f64) as usize;
-    let total_filled = (green_len + blue_len + yellow_len).min(available);
-    let empty = available.saturating_sub(total_filled);
-
-    let line = Line::from(vec![
-        Span::styled(prefix, Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD)),
-        Span::styled("[", Style::default().fg(cs.cpu_label)),
-        Span::styled("|".repeat(green_len), Style::default().fg(cs.mem_bar_used)),
-        Span::styled("|".repeat(blue_len), Style::default().fg(cs.mem_bar_buffers)),
-        Span::styled("|".repeat(yellow_len), Style::default().fg(cs.mem_bar_cache)),
-        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
-        Span::styled("]", Style::default().fg(cs.cpu_label)),
-        Span::styled(suffix, Style::default().fg(cs.cpu_label)),
-    ]);
-
-    f.render_widget(Paragraph::new(line), area);
+    draw_htop_bar(
+        f,
+        "Mem",
+        &[(used_frac, cs.mem_bar_used), (buffer_frac, cs.mem_bar_buffers), (cache_frac, cs.mem_bar_cache)],
+        &text,
+        cs.cpu_label,
+        cs.cpu_bar_bg,
+        area,
+    );
 }
 
 /// Draw the swap usage bar (green only, like htop)
@@ -377,67 +429,42 @@ fn draw_swap_bar(f: &mut Frame, app: &App, area: Rect) {
 
     let used_str = format_bytes(mem.used_swap);
     let total_str = format_bytes(mem.total_swap);
-    let suffix = format!("{}/{}", used_str, total_str);
+    let text = format!("{}/{}", used_str, total_str);
 
-    let prefix = "Swp";
-    let bar_width = area.width as usize;
-    let bracket_len = 2;
-    let available = bar_width.saturating_sub(prefix.len() + suffix.len() + bracket_len + 1);
-
-    let filled = ((usage_frac) * available as f64) as usize;
-    let filled = filled.min(available);
-    let empty = available.saturating_sub(filled);
-
-    let line = Line::from(vec![
-        Span::styled(prefix, Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD)),
-        Span::styled("[", Style::default().fg(cs.cpu_label)),
-        Span::styled("|".repeat(filled), Style::default().fg(cs.swap_bar)),
-        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
-        Span::styled("]", Style::default().fg(cs.cpu_label)),
-        Span::styled(suffix, Style::default().fg(cs.cpu_label)),
-    ]);
-
-    f.render_widget(Paragraph::new(line), area);
+    draw_htop_bar(
+        f,
+        "Swp",
+        &[(usage_frac, cs.swap_bar)],
+        &text,
+        cs.cpu_label,
+        cs.cpu_bar_bg,
+        area,
+    );
 }
 
-/// Draw network throughput bar: "Net[||||rx|||tx| 1.2M/s↓ 340K/s↑]"
+/// Draw network throughput bar: "Net[||||rx|||tx|   1.2M/s↓ 340K/s↑]"
 fn draw_network_bar(f: &mut Frame, app: &App, area: Rect) {
     let net = &app.network_info;
+    let cs = &app.color_scheme;
 
     let rx_str = format_rate(net.rx_bytes_per_sec);
     let tx_str = format_rate(net.tx_bytes_per_sec);
-    let suffix = format!("{}↓ {}↑", rx_str, tx_str);
+    let text = format!("{}↓ {}↑", rx_str, tx_str);
 
-    let prefix = "Net";
-    let bar_width = area.width as usize;
-    let bracket_len = 2;
-    let available = bar_width.saturating_sub(prefix.len() + suffix.len() + bracket_len + 1);
+    // Scale bar based on 1 Gbps as visual max
+    let max_rate = 125_000_000.0_f64;
+    let rx_frac = if net.rx_bytes_per_sec > 0.0 { (net.rx_bytes_per_sec / max_rate).min(1.0) } else { 0.0 };
+    let tx_frac = if net.tx_bytes_per_sec > 0.0 { (net.tx_bytes_per_sec / max_rate).min(1.0) } else { 0.0 };
 
-    // Scale bar based on a dynamic max (auto-scale to peak)
-    let total_rate = net.rx_bytes_per_sec + net.tx_bytes_per_sec;
-    // Use 1 Gbps as visual max for the bar
-    let max_rate = 125_000_000.0_f64; // 1 Gbps in bytes/sec
-
-    let rx_frac = if total_rate > 0.0 { net.rx_bytes_per_sec / max_rate } else { 0.0 };
-    let tx_frac = if total_rate > 0.0 { net.tx_bytes_per_sec / max_rate } else { 0.0 };
-
-    let green_len = ((rx_frac) * available as f64).min(available as f64) as usize;
-    let magenta_len = ((tx_frac) * available as f64).min((available - green_len) as f64) as usize;
-    let total_filled = (green_len + magenta_len).min(available);
-    let empty = available.saturating_sub(total_filled);
-
-    let cs = &app.color_scheme;
-    let line = Line::from(vec![
-        Span::styled(prefix, Style::default().fg(cs.cpu_label).add_modifier(Modifier::BOLD)),
-        Span::styled("[", Style::default().fg(cs.cpu_label)),
-        Span::styled("|".repeat(green_len), Style::default().fg(cs.cpu_bar_normal)),
-        Span::styled("|".repeat(magenta_len), Style::default().fg(Color::Magenta)),
-        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
-        Span::styled("]", Style::default().fg(cs.cpu_label)),
-        Span::styled(suffix, Style::default().fg(cs.cpu_label)),
-    ]);
-
-    f.render_widget(Paragraph::new(line), area);
+    draw_htop_bar(
+        f,
+        "Net",
+        &[(rx_frac, cs.cpu_bar_normal), (tx_frac, Color::Magenta)],
+        &text,
+        cs.cpu_label,
+        cs.cpu_bar_bg,
+        area,
+    );
 }
 
 /// Format bytes/sec as human-readable rate
@@ -511,17 +538,9 @@ fn format_uptime(seconds: u64) -> String {
 fn draw_gpu_bar(f: &mut Frame, app: &App, area: Rect) {
     let cs = &app.color_scheme;
     let usage = app.gpu_overall_usage;
-    let usage_frac = (usage / 100.0).clamp(0.0, 1.0);
+    let usage_frac = (usage / 100.0).clamp(0.0, 1.0) as f64;
 
-    let suffix = format!("{:5.1}%", usage);
-    let prefix = "GPU";
-    let bar_width = area.width as usize;
-    let bracket_len = 2;
-    let available = bar_width.saturating_sub(prefix.len() + suffix.len() + bracket_len + 1);
-
-    let filled = (usage_frac * available as f64) as usize;
-    let filled = filled.min(available);
-    let empty = available.saturating_sub(filled);
+    let text = format!("{:.1}%", usage);
 
     // Color the bar: green < 50%, yellow 50-80%, red > 80%
     let bar_color = if usage > 80.0 {
@@ -532,16 +551,15 @@ fn draw_gpu_bar(f: &mut Frame, app: &App, area: Rect) {
         cs.cpu_bar_normal
     };
 
-    let line = Line::from(vec![
-        Span::styled(prefix, Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)),
-        Span::styled("[", Style::default().fg(cs.cpu_label)),
-        Span::styled("|".repeat(filled), Style::default().fg(bar_color)),
-        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
-        Span::styled("]", Style::default().fg(cs.cpu_label)),
-        Span::styled(suffix, Style::default().fg(cs.cpu_label)),
-    ]);
-
-    f.render_widget(Paragraph::new(line), area);
+    draw_htop_bar(
+        f,
+        "GPU",
+        &[(usage_frac, bar_color)],
+        &text,
+        Color::LightCyan,
+        cs.cpu_bar_bg,
+        area,
+    );
 }
 
 /// Draw GPU VRAM bar: "VMem[||||      2.1G used]"
@@ -550,12 +568,7 @@ fn draw_vram_bar(f: &mut Frame, app: &App, area: Rect) {
     let dedicated = app.gpu_dedicated_mem;
 
     let used_str = format_bytes(dedicated);
-    let suffix = format!("{} used", used_str);
-
-    let prefix = "VMem";
-    let bar_width = area.width as usize;
-    let bracket_len = 2;
-    let available = bar_width.saturating_sub(prefix.len() + suffix.len() + bracket_len + 1);
+    let text = format!("{} used", used_str);
 
     // Scale against a reasonable GPU VRAM max — auto-detect would be ideal,
     // but for now use 24 GB as a reasonable modern GPU ceiling.
@@ -566,10 +579,6 @@ fn draw_vram_bar(f: &mut Frame, app: &App, area: Rect) {
         0.0
     };
 
-    let filled = (usage_frac * available as f64) as usize;
-    let filled = filled.min(available);
-    let empty = available.saturating_sub(filled);
-
     let bar_color = if usage_frac > 0.8 {
         Color::Red
     } else if usage_frac > 0.5 {
@@ -578,14 +587,13 @@ fn draw_vram_bar(f: &mut Frame, app: &App, area: Rect) {
         Color::LightCyan
     };
 
-    let line = Line::from(vec![
-        Span::styled(prefix, Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD)),
-        Span::styled("[", Style::default().fg(cs.cpu_label)),
-        Span::styled("|".repeat(filled), Style::default().fg(bar_color)),
-        Span::styled(" ".repeat(empty), Style::default().fg(cs.cpu_bar_bg)),
-        Span::styled("]", Style::default().fg(cs.cpu_label)),
-        Span::styled(suffix, Style::default().fg(cs.cpu_label)),
-    ]);
-
-    f.render_widget(Paragraph::new(line), area);
+    draw_htop_bar(
+        f,
+        "VMem",
+        &[(usage_frac, bar_color)],
+        &text,
+        Color::LightCyan,
+        cs.cpu_bar_bg,
+        area,
+    );
 }

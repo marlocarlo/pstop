@@ -77,7 +77,8 @@ pub fn header_height(app: &App, term_height: u16, term_width: u16) -> u16 {
     };
     let left_total = left_cpu_rows + 3; // Mem + Swap/GPU + Net/VMem
     let right_total = right_cpu_rows + 3; // Tasks + Load + Uptime
-    left_total.max(right_total) as u16
+    let pad: usize = if app.header_margin { 2 } else { 0 }; // htop: pad=2 when margin on
+    (left_total.max(right_total) + pad) as u16
 }
 
 /// Render the complete UI

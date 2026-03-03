@@ -329,7 +329,12 @@ impl App {
                 ProcessSortField::SharedMem => a.shared_mem.cmp(&b.shared_mem),
                 ProcessSortField::Cpu => a.cpu_usage.partial_cmp(&b.cpu_usage).unwrap_or(std::cmp::Ordering::Equal),
                 ProcessSortField::Mem => a.mem_usage.partial_cmp(&b.mem_usage).unwrap_or(std::cmp::Ordering::Equal),
-                ProcessSortField::Time => a.run_time.cmp(&b.run_time),
+                ProcessSortField::Time => {
+                    // Sort by cpu_time_100ns (what TIME+ displays), falling back to run_time
+                    let a_time = if a.cpu_time_100ns > 0 { a.cpu_time_100ns } else { a.run_time * 10_000_000 };
+                    let b_time = if b.cpu_time_100ns > 0 { b.cpu_time_100ns } else { b.run_time * 10_000_000 };
+                    a_time.cmp(&b_time)
+                }
                 ProcessSortField::Threads => a.threads.cmp(&b.threads),
                 ProcessSortField::Command => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
                 ProcessSortField::Status => a.status.cmp(&b.status),

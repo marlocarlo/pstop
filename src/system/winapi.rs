@@ -534,8 +534,8 @@ fn get_process_user(pid: u32) -> Option<String> {
 
         let ok = LookupAccountSidW(
             None, sid,
-            windows::core::PWSTR(name_buf.as_mut_ptr()), &mut name_len,
-            windows::core::PWSTR(domain_buf.as_mut_ptr()), &mut domain_len,
+            Some(windows::core::PWSTR(name_buf.as_mut_ptr())), &mut name_len,
+            Some(windows::core::PWSTR(domain_buf.as_mut_ptr())), &mut domain_len,
             &mut sid_type,
         );
 
@@ -641,8 +641,8 @@ pub fn get_process_handles(pid: u32) -> Vec<HandleInfo> {
 
                 let mut filename = vec![0u16; MAX_PATH as usize];
                 let len = GetModuleFileNameExW(
-                    handle,
-                    modules[i],
+                    Some(handle),
+                    Some(modules[i]),
                     &mut filename,
                 );
 

@@ -23,14 +23,14 @@ path = "src/bin/htop.rs"
 
 [dependencies]
 # TUI framework
-ratatui = "0.29"
-crossterm = "0.28"
+ratatui = "0.30"
+crossterm = "0.29"
 
 # System information
-sysinfo = "0.33"
+sysinfo = "0.38"
 
 # Windows-specific APIs
-windows = { version = "0.58", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Threading",
     "Win32_System_ProcessStatus",
@@ -50,7 +50,7 @@ anyhow = "1"
 chrono = "0.4"
 
 # Unicode width for proper column alignment
-unicode-width = "0.2"
+unicode-width = "0.2.2"
 
 [profile.release]
 opt-level = 3

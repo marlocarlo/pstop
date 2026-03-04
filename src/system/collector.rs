@@ -194,7 +194,7 @@ impl Collector {
         let brand = cpus.first().map(|c| c.brand().to_string()).unwrap_or_default();
 
         app.cpu_info = CpuInfo {
-            physical_cores: self.sys.physical_core_count().unwrap_or(cores.len()),
+            physical_cores: sysinfo::System::physical_core_count().unwrap_or(cores.len()),
             logical_cores: cores.len(),
             total_usage,
             brand,

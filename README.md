@@ -275,10 +275,10 @@ Format: simple `key=value` (htoprc-style). Persisted settings include:
 ## Contributing
 
 Contributions welcome! This is a Rust project using:
-- **ratatui** 0.29 - TUI framework
-- **crossterm** 0.28 - Terminal backend
-- **sysinfo** 0.33 - System information
-- **windows** 0.58 - Native Win32 APIs
+- **ratatui** 0.30 - TUI framework
+- **crossterm** 0.29 - Terminal backend
+- **sysinfo** 0.38 - System information
+- **windows** 0.62 - Native Win32 APIs
 
 ```powershell
 git clone https://github.com/marlocarlo/pstop.git

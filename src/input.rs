@@ -775,24 +775,54 @@ fn handle_setup_mode(app: &mut App, key: KeyEvent) {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-/// Kill a process by PID on Windows using taskkill
+/// Kill a process by PID on Windows.
 /// signal_index: 0=SIGTERM (graceful), 1=SIGKILL (force), etc.
+///
+/// All paths are non-blocking so the TUI never freezes:
+/// - Force kill uses Win32 TerminateProcess (instant).
+/// - Graceful kill spawns taskkill in a background thread with a timeout.
 fn kill_process_with_signal(pid: u32, signal_index: usize) {
-    use std::process::Command;
     match signal_index {
         0 => {
-            // SIGTERM equivalent: try graceful close via taskkill without /F
-            let result = Command::new("taskkill")
-                .args(["/PID", &pid.to_string()])
-                .output();
-            // If graceful fails, don't force — user chose graceful
-            let _ = result;
+            // SIGTERM equivalent: graceful close via taskkill, non-blocking
+            std::thread::spawn(move || {
+                use std::process::Command;
+                #[cfg(windows)]
+                use std::os::windows::process::CommandExt;
+                // CREATE_NO_WINDOW = 0x08000000
+                let child = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string()])
+                    .creation_flags(0x08000000)
+                    .spawn();
+                if let Ok(mut child) = child {
+                    // Wait up to 5 seconds, then give up (don't block forever)
+                    let deadline = std::time::Instant::now()
+                        + std::time::Duration::from_secs(5);
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(_)) => break,
+                            Ok(None) => {
+                                if std::time::Instant::now() >= deadline {
+                                    let _ = child.kill();
+                                    break;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(50));
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                }
+            });
         }
         _ => {
-            // SIGKILL and others: force kill
-            let _ = Command::new("taskkill")
-                .args(["/F", "/PID", &pid.to_string()])
-                .output();
+            // SIGKILL / force kill: use TerminateProcess directly (instant, no subprocess)
+            use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+            unsafe {
+                if let Ok(handle) = OpenProcess(PROCESS_TERMINATE, false, pid) {
+                    let _ = TerminateProcess(handle, 1);
+                    let _ = windows::Win32::Foundation::CloseHandle(handle);
+                }
+            }
         }
     }
 }

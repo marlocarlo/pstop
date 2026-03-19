@@ -86,18 +86,18 @@ cargo install pstop
 
 ### From GitHub Releases
 
-Download the latest `.zip` from [GitHub Releases](https://github.com/marlocarlo/pstop/releases), extract, and add to your `PATH`.
+Download the latest `.zip` from [GitHub Releases](https://github.com/psmux/pstop/releases), extract, and add to your `PATH`.
 
 ### From Source
 
 ```powershell
-cargo install --git https://github.com/marlocarlo/pstop
+cargo install --git https://github.com/psmux/pstop
 ```
 
 ### Build Locally
 
 ```powershell
-git clone https://github.com/marlocarlo/pstop.git
+git clone https://github.com/psmux/pstop.git
 cd pstop
 cargo build --release
 # Binary at: target/release/pstop.exe + target/release/htop.exe
@@ -317,7 +317,7 @@ Contributions welcome! This is a Rust project using:
 - **windows** 0.62 - Native Win32 APIs
 
 ```powershell
-git clone https://github.com/marlocarlo/pstop.git
+git clone https://github.com/psmux/pstop.git
 cd pstop
 cargo run
 ```

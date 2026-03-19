@@ -6,13 +6,13 @@
     <title>pstop - htop for Windows</title>
     <authors>marlocarlo</authors>
     <owners>marlocarlo</owners>
-    <projectUrl>https://github.com/marlocarlo/pstop</projectUrl>
-    <licenseUrl>https://github.com/marlocarlo/pstop/blob/master/LICENSE</licenseUrl>
-    <iconUrl>https://cdn.jsdelivr.net/gh/marlocarlo/pstop@master/icon.png</iconUrl>
+    <projectUrl>https://github.com/psmux/pstop</projectUrl>
+    <licenseUrl>https://github.com/psmux/pstop/blob/master/LICENSE</licenseUrl>
+    <iconUrl>https://cdn.jsdelivr.net/gh/psmux/pstop@master/icon.png</iconUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
-    <projectSourceUrl>https://github.com/marlocarlo/pstop</projectSourceUrl>
-    <docsUrl>https://github.com/marlocarlo/pstop#readme</docsUrl>
-    <bugTrackerUrl>https://github.com/marlocarlo/pstop/issues</bugTrackerUrl>
+    <projectSourceUrl>https://github.com/psmux/pstop</projectSourceUrl>
+    <docsUrl>https://github.com/psmux/pstop#readme</docsUrl>
+    <bugTrackerUrl>https://github.com/psmux/pstop/issues</bugTrackerUrl>
     <tags>htop top system-monitor process-viewer tui terminal windows rust cli</tags>
     <copyright>Copyright (c) marlocarlo</copyright>
     <summary>htop for Windows — beautiful, fast TUI system monitor</summary>
@@ -28,7 +28,7 @@
 - Full mouse support
 - ~1 MB binary, zero dependencies
     </description>
-    <releaseNotes>https://github.com/marlocarlo/pstop/releases</releaseNotes>
+    <releaseNotes>https://github.com/psmux/pstop/releases</releaseNotes>
   </metadata>
   <files>
     <file src="tools\**" target="tools" />

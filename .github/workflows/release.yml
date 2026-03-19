@@ -236,14 +236,14 @@ jobs:
             (Get-FileHash pstop-windows-x86_64.zip -Algorithm SHA256).Hash
 
           The source code is available at:
-            https://github.com/marlocarlo/pstop
+            https://github.com/psmux/pstop
 
           The binaries are built from source using 'cargo build --release' via the
           GitHub Actions workflow at:
-            https://github.com/marlocarlo/pstop/actions
+            https://github.com/psmux/pstop/actions
 
           License: MIT
-            https://github.com/marlocarlo/pstop/blob/master/LICENSE
+            https://github.com/psmux/pstop/blob/master/LICENSE
           "@ -replace '(?m)^          ', '' | Set-Content "choco/tools/VERIFICATION.txt"
 
           Write-Host "=== nuspec ==="
@@ -395,12 +395,12 @@ jobs:
           PackageVersion: $version
           PackageLocale: en-US
           Publisher: marlocarlo
-          PublisherUrl: https://github.com/marlocarlo
-          PublisherSupportUrl: https://github.com/marlocarlo/pstop/issues
+          PublisherUrl: https://github.com/psmux
+          PublisherSupportUrl: https://github.com/psmux/pstop/issues
           PackageName: pstop
-          PackageUrl: https://github.com/marlocarlo/pstop
+          PackageUrl: https://github.com/psmux/pstop
           License: MIT
-          LicenseUrl: https://github.com/marlocarlo/pstop/blob/master/LICENSE
+          LicenseUrl: https://github.com/psmux/pstop/blob/master/LICENSE
           ShortDescription: htop for Windows — beautiful, fast TUI system monitor
           Description: |-
             pstop is a full drop-in replacement for htop on Windows. Beautiful TUI system monitor

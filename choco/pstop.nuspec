@@ -10,6 +10,7 @@
     <licenseUrl>https://github.com/psmux/pstop/blob/master/LICENSE</licenseUrl>
     <iconUrl>https://cdn.jsdelivr.net/gh/psmux/pstop@master/icon.png</iconUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <packageSourceUrl>https://github.com/psmux/pstop/tree/master/choco</packageSourceUrl>
     <projectSourceUrl>https://github.com/psmux/pstop</projectSourceUrl>
     <docsUrl>https://github.com/psmux/pstop#readme</docsUrl>
     <bugTrackerUrl>https://github.com/psmux/pstop/issues</bugTrackerUrl>

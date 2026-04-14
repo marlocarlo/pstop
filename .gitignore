@@ -4,3 +4,6 @@
 *.exe
 *.pdb
 build_result.txt
+
+# Chocolatey packaging
+*.nupkg

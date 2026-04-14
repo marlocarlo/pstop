@@ -113,7 +113,9 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    Ok(())
+    // Force-exit to kill any lingering background threads (collector
+    // batch threads for I/O counters, process data, etc.).
+    std::process::exit(0);
 }
 
 /// Main application loop

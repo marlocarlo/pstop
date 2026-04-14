@@ -6,6 +6,12 @@ use crate::system::winapi;
 
 /// Handle a single key input event.
 pub fn handle_input(app: &mut App, key: KeyEvent) {
+    // Ctrl+C always quits, regardless of current mode
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        app.should_quit = true;
+        return;
+    }
+
     match app.mode {
         AppMode::Normal    => handle_normal_mode(app, key),
         AppMode::Search    => handle_search_mode(app, key),
@@ -27,9 +33,6 @@ fn handle_normal_mode(app: &mut App, key: KeyEvent) {
     match key.code {
         // ── Quit ──
         KeyCode::F(10) | KeyCode::Char('q') => app.should_quit = true,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.should_quit = true;
-        }
 
         // ── Navigation (arrows + Alt-j/Alt-k per htop man page) ──
         KeyCode::Up    => app.select_prev(),
@@ -279,21 +282,25 @@ fn handle_search_mode(app: &mut App, key: KeyEvent) {
             app.search_query.pop();
             app.search_first();
         }
-        KeyCode::Char(c) => {
+        KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT => {
             app.search_query.push(c);
             app.search_first();
         }
         KeyCode::Up   => app.select_prev(),
         KeyCode::Down  => app.select_next(),
-        KeyCode::F(10) => app.should_quit = true,
         KeyCode::F(3) => {
             if key.modifiers.contains(KeyModifiers::SHIFT) {
-                // Shift+F3 = find previous (htop behavior)
                 app.search_prev();
             } else {
-                // F3 again = find next
                 app.search_next();
             }
+        }
+        // F-keys pass through: exit search and handle in normal mode (htop behavior)
+        KeyCode::F(_) => {
+            app.mode = AppMode::Normal;
+            app.search_query.clear();
+            app.search_not_found = false;
+            handle_normal_mode(app, key);
         }
         _ => {}
     }
@@ -322,7 +329,7 @@ fn handle_filter_mode(app: &mut App, key: KeyEvent) {
             if app.tree_view { app.build_tree_view(); }
             app.clamp_selection();
         }
-        KeyCode::Char(c) => {
+        KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT => {
             app.filter_query.push(c);
             app.apply_filter();
             app.sort_processes();
@@ -331,7 +338,11 @@ fn handle_filter_mode(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Up   => app.select_prev(),
         KeyCode::Down  => app.select_next(),
-        KeyCode::F(10) => app.should_quit = true,
+        // F-keys pass through: confirm filter and handle in normal mode (htop behavior)
+        KeyCode::F(_) => {
+            app.mode = AppMode::Normal;
+            handle_normal_mode(app, key);
+        }
         _ => {}
     }
 }

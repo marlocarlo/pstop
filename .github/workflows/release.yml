@@ -269,18 +269,26 @@ jobs:
         env:
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
-          $ErrorActionPreference = 'Continue'
+          $ErrorActionPreference = 'Stop'
           $version = "${{ needs.build.outputs.version }}"
           cd choco
-          $output = choco push "pstop.${version}.nupkg" --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY 2>&1 | Out-String
+          $nupkg = "pstop.${version}.nupkg"
+
+          # Use dotnet nuget push (more reliable than choco push)
+          $output = dotnet nuget push $nupkg --api-key $env:CHOCO_API_KEY --source "https://push.chocolatey.org/" --skip-duplicate 2>&1 | Out-String
           Write-Host $output
-          if ($LASTEXITCODE -ne 0) {
-            if ($output -match 'already exists' -or $output -match 'submitted state' -or $output -match '409' -or $output -match '403') {
-              Write-Host "::warning::Chocolatey push blocked (package may already exist or be in moderation) — treating as success"
-              exit 0
-            }
-            throw "choco push failed with exit code $LASTEXITCODE`: $output"
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Successfully pushed $nupkg to Chocolatey"
+            exit 0
           }
+
+          # If dotnet push failed, check for "already exists" (skip duplicate)
+          if ($output -match 'already exists' -or $output -match 'Conflict' -or $output -match '409') {
+            Write-Host "::warning::Package version already exists on Chocolatey, skipping"
+            exit 0
+          }
+
+          throw "Chocolatey push failed: $output"
 
   # ── Publish to WinGet ───────────────────────────────────────────────
   publish-winget:

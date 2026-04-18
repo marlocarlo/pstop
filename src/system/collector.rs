@@ -218,17 +218,45 @@ impl Collector {
         if matches!(app.active_tab, crate::app::ProcessTab::Net) {
             let conn_counts = netstat::count_connections_per_pid();
 
-            // Build ProcessNetBandwidth by matching connection PIDs to process I/O rates
-            let net_procs: Vec<netstat::ProcessNetBandwidth> = conn_counts
+            // Collect raw I/O rates for processes with connections
+            let raw: Vec<(u32, String, f64, f64, u32)> = conn_counts
                 .into_iter()
                 .map(|(pid, count)| {
-                    let (name, recv, send) = app.processes.iter()
+                    let (name, io_read, io_write) = app.processes.iter()
                         .find(|p| p.pid == pid)
                         .map(|p| (p.name.clone(), p.io_read_rate, p.io_write_rate))
                         .unwrap_or_else(|| {
                             let name = if pid == 4 { "System".to_string() } else { format!("PID:{}", pid) };
                             (name, 0.0, 0.0)
                         });
+                    (pid, name, io_read, io_write, count)
+                })
+                .collect();
+
+            // Scale per-process I/O by system-wide network rates so that
+            // Download/Upload columns reflect actual network direction.
+            // GetProcessIoCounters includes ALL I/O (disk + network), so raw
+            // io_write_rate is inflated during downloads (saving to disk).
+            // Apportioning the true sysinfo network rate by each process's
+            // I/O share keeps the columns directionally correct.
+            let sys_rx = app.network_info.rx_bytes_per_sec;
+            let sys_tx = app.network_info.tx_bytes_per_sec;
+            let total_io_read: f64 = raw.iter().map(|(_, _, r, _, _)| *r).sum();
+            let total_io_write: f64 = raw.iter().map(|(_, _, _, w, _)| *w).sum();
+
+            let net_procs: Vec<netstat::ProcessNetBandwidth> = raw
+                .into_iter()
+                .map(|(pid, name, io_read, io_write, count)| {
+                    let recv = if total_io_read > 0.0 {
+                        sys_rx * (io_read / total_io_read)
+                    } else {
+                        0.0
+                    };
+                    let send = if total_io_write > 0.0 {
+                        sys_tx * (io_write / total_io_write)
+                    } else {
+                        0.0
+                    };
                     netstat::ProcessNetBandwidth {
                         pid,
                         name,

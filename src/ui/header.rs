@@ -513,14 +513,14 @@ fn draw_swap_bar(f: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-/// Draw network throughput bar: "Net[||||rx|||tx|   1.2M/s↓ 340K/s↑]"
+/// Draw network throughput bar: "Net[||||rx|||tx|   ↓1.2M/s ↑340K/s]"
 fn draw_network_bar(f: &mut Frame, app: &App, area: Rect) {
     let net = &app.network_info;
     let cs = &app.color_scheme;
 
     let rx_str = format_rate(net.rx_bytes_per_sec);
     let tx_str = format_rate(net.tx_bytes_per_sec);
-    let text = format!("{}↓ {}↑", rx_str, tx_str);
+    let text = format!("↓{} ↑{}", rx_str, tx_str);
 
     // Scale bar based on 1 Gbps as visual max
     let max_rate = 125_000_000.0_f64;
